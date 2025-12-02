@@ -89,12 +89,6 @@ export function UsageSummary() {
 
   // Fetch usage stats
   const fetchStats = async () => {
-    if (!proxyStatus().running) {
-      setStats(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       const data = await getUsageStats();
       setStats(data);
@@ -121,14 +115,9 @@ export function UsageSummary() {
     onCleanup(() => clearInterval(interval));
   });
 
-  // Fetch stats on mount only - no auto-refresh to reduce API spam
+  // Fetch stats on mount - works regardless of proxy state now
   createEffect(() => {
-    if (proxyStatus().running) {
-      fetchStats();
-    } else {
-      setStats(null);
-      setLoading(false);
-    }
+    fetchStats();
   });
 
   const successRate = () => {
@@ -380,12 +369,14 @@ export function UsageSummary() {
       </Show>
 
       {/* Empty state when no usage yet */}
-      <Show when={!loading() && !hasStats() && proxyStatus().running}>
+      <Show when={!loading() && !hasStats()}>
         <div class="text-center py-4 px-4 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-100 dark:border-blue-800/50">
           <div class="flex items-center justify-center gap-2 mb-2">
             <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
             <p class="text-sm font-medium text-blue-700 dark:text-blue-300">
-              Ready to track usage
+              {proxyStatus().running
+                ? "Ready to track usage"
+                : "No usage data yet"}
             </p>
           </div>
           <p class="text-xs text-blue-600/70 dark:text-blue-400/70">

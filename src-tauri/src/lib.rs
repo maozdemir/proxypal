@@ -629,164 +629,122 @@ fn get_auth_status(state: State<AppState>) -> AuthStatus {
     state.auth_status.lock().unwrap().clone()
 }
 
-// Fetch usage statistics from CLIProxyAPI Management API
+// Compute usage statistics from local request history (persisted data)
+// This ensures Analytics shows the same data as Dashboard's Request History
 #[tauri::command]
-async fn get_usage_stats(state: State<'_, AppState>) -> Result<UsageStats, String> {
-    // Check if proxy is running
-    let port = {
-        let status = state.proxy_status.lock().unwrap();
-        if !status.running {
-            return Ok(UsageStats::default());
-        }
-        state.config.lock().unwrap().port
-    };
+fn get_usage_stats() -> UsageStats {
+    let history = load_request_history();
     
-    // Fetch from Management API with auth header
-    let url = format!("http://127.0.0.1:{}/v0/management/usage", port);
-    
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .header("X-Management-Key", "proxypal-mgmt-key")
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch usage: {}", e))?;
-    
-    if !response.status().is_success() {
-        return Ok(UsageStats::default());
+    if history.requests.is_empty() {
+        return UsageStats::default();
     }
     
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse usage response: {}", e))?;
+    // Compute aggregate stats
+    let total_requests = history.requests.len() as u64;
+    let success_count = history.requests.iter().filter(|r| r.status < 400).count() as u64;
+    let failure_count = total_requests - success_count;
     
-    // Parse the response according to Management API format
-    let usage = json.get("usage").unwrap_or(&json);
+    let input_tokens = history.total_tokens_in;
+    let output_tokens = history.total_tokens_out;
+    let total_tokens = input_tokens + output_tokens;
     
-    let total_requests = usage.get("total_requests").and_then(|v| v.as_u64()).unwrap_or(0);
-    let success_count = usage.get("success_count").and_then(|v| v.as_u64()).unwrap_or(0);
-    let failure_count = usage.get("failure_count").and_then(|v| v.as_u64()).unwrap_or(0);
-    let total_tokens = usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+    // Get today's start timestamp for filtering
+    let today_start = chrono::Local::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(chrono::Local)
+        .unwrap()
+        .timestamp_millis() as u64;
     
-    // Get today's date for filtering
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    // Compute today's stats
+    let requests_today = history.requests.iter()
+        .filter(|r| r.timestamp >= today_start)
+        .count() as u64;
     
-    let requests_today = usage
-        .get("requests_by_day")
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get(&today))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let tokens_today: u64 = history.requests.iter()
+        .filter(|r| r.timestamp >= today_start)
+        .map(|r| (r.tokens_in.unwrap_or(0) + r.tokens_out.unwrap_or(0)) as u64)
+        .sum();
     
-    let tokens_today = usage
-        .get("tokens_by_day")
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get(&today))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    // Build time-series data (requests by day)
+    let mut requests_by_day_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut tokens_by_day_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut requests_by_hour_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut tokens_by_hour_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     
-    // Parse time-series data for charts
-    let mut requests_by_day: Vec<TimeSeriesPoint> = Vec::new();
-    let mut tokens_by_day: Vec<TimeSeriesPoint> = Vec::new();
-    let mut requests_by_hour: Vec<TimeSeriesPoint> = Vec::new();
-    let mut tokens_by_hour: Vec<TimeSeriesPoint> = Vec::new();
-    
-    // Parse requests_by_day
-    if let Some(by_day) = usage.get("requests_by_day").and_then(|v| v.as_object()) {
-        let mut entries: Vec<_> = by_day.iter().collect();
-        entries.sort_by(|a, b| a.0.cmp(b.0)); // Sort by date
-        for (date, value) in entries.iter().rev().take(14) { // Last 14 days
-            requests_by_day.push(TimeSeriesPoint {
-                label: date.to_string(),
-                value: value.as_u64().unwrap_or(0),
-            });
-        }
-        requests_by_day.reverse(); // Oldest first
+    for req in &history.requests {
+        // Convert timestamp to datetime
+        let dt = chrono::DateTime::from_timestamp_millis(req.timestamp as i64)
+            .unwrap_or_else(|| chrono::Utc::now());
+        let local_dt = dt.with_timezone(&chrono::Local);
+        
+        // Day key: YYYY-MM-DD
+        let day_key = local_dt.format("%Y-%m-%d").to_string();
+        *requests_by_day_map.entry(day_key.clone()).or_insert(0) += 1;
+        let req_tokens = (req.tokens_in.unwrap_or(0) + req.tokens_out.unwrap_or(0)) as u64;
+        *tokens_by_day_map.entry(day_key).or_insert(0) += req_tokens;
+        
+        // Hour key: YYYY-MM-DDTHH
+        let hour_key = local_dt.format("%Y-%m-%dT%H").to_string();
+        *requests_by_hour_map.entry(hour_key.clone()).or_insert(0) += 1;
+        *tokens_by_hour_map.entry(hour_key).or_insert(0) += req_tokens;
     }
     
-    // Parse tokens_by_day
-    if let Some(by_day) = usage.get("tokens_by_day").and_then(|v| v.as_object()) {
-        let mut entries: Vec<_> = by_day.iter().collect();
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        for (date, value) in entries.iter().rev().take(14) {
-            tokens_by_day.push(TimeSeriesPoint {
-                label: date.to_string(),
-                value: value.as_u64().unwrap_or(0),
-            });
-        }
-        tokens_by_day.reverse();
+    // Convert maps to sorted vectors (oldest first)
+    let mut requests_by_day: Vec<TimeSeriesPoint> = requests_by_day_map
+        .into_iter()
+        .map(|(label, value)| TimeSeriesPoint { label, value })
+        .collect();
+    requests_by_day.sort_by(|a, b| a.label.cmp(&b.label));
+    // Keep last 14 days
+    if requests_by_day.len() > 14 {
+        requests_by_day = requests_by_day.split_off(requests_by_day.len() - 14);
     }
     
-    // Parse requests_by_hour (last 24 hours)
-    if let Some(by_hour) = usage.get("requests_by_hour").and_then(|v| v.as_object()) {
-        let mut entries: Vec<_> = by_hour.iter().collect();
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        for (hour, value) in entries.iter().rev().take(24) {
-            requests_by_hour.push(TimeSeriesPoint {
-                label: hour.to_string(),
-                value: value.as_u64().unwrap_or(0),
-            });
-        }
-        requests_by_hour.reverse();
+    let mut tokens_by_day: Vec<TimeSeriesPoint> = tokens_by_day_map
+        .into_iter()
+        .map(|(label, value)| TimeSeriesPoint { label, value })
+        .collect();
+    tokens_by_day.sort_by(|a, b| a.label.cmp(&b.label));
+    if tokens_by_day.len() > 14 {
+        tokens_by_day = tokens_by_day.split_off(tokens_by_day.len() - 14);
     }
     
-    // Parse tokens_by_hour
-    if let Some(by_hour) = usage.get("tokens_by_hour").and_then(|v| v.as_object()) {
-        let mut entries: Vec<_> = by_hour.iter().collect();
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        for (hour, value) in entries.iter().rev().take(24) {
-            tokens_by_hour.push(TimeSeriesPoint {
-                label: hour.to_string(),
-                value: value.as_u64().unwrap_or(0),
-            });
-        }
-        tokens_by_hour.reverse();
+    let mut requests_by_hour: Vec<TimeSeriesPoint> = requests_by_hour_map
+        .into_iter()
+        .map(|(label, value)| TimeSeriesPoint { label, value })
+        .collect();
+    requests_by_hour.sort_by(|a, b| a.label.cmp(&b.label));
+    // Keep last 24 hours
+    if requests_by_hour.len() > 24 {
+        requests_by_hour = requests_by_hour.split_off(requests_by_hour.len() - 24);
     }
     
-    // Parse model usage from apis section
-    let mut models: Vec<ModelUsage> = Vec::new();
-    let mut input_tokens: u64 = 0;
-    let mut output_tokens: u64 = 0;
-    
-    if let Some(apis) = usage.get("apis").and_then(|v| v.as_object()) {
-        for (_endpoint, endpoint_data) in apis {
-            if let Some(models_obj) = endpoint_data.get("models").and_then(|v| v.as_object()) {
-                for (model_name, model_data) in models_obj {
-                    let requests = model_data.get("total_requests").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let tokens = model_data.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    
-                    // Sum up input/output tokens from details
-                    if let Some(details) = model_data.get("details").and_then(|v| v.as_array()) {
-                        for detail in details {
-                            if let Some(token_info) = detail.get("tokens") {
-                                input_tokens += token_info.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                output_tokens += token_info.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                            }
-                        }
-                    }
-                    
-                    // Check if model already exists in our list
-                    if let Some(existing) = models.iter_mut().find(|m| m.model == *model_name) {
-                        existing.requests += requests;
-                        existing.tokens += tokens;
-                    } else {
-                        models.push(ModelUsage {
-                            model: model_name.clone(),
-                            requests,
-                            tokens,
-                        });
-                    }
-                }
-            }
-        }
+    let mut tokens_by_hour: Vec<TimeSeriesPoint> = tokens_by_hour_map
+        .into_iter()
+        .map(|(label, value)| TimeSeriesPoint { label, value })
+        .collect();
+    tokens_by_hour.sort_by(|a, b| a.label.cmp(&b.label));
+    if tokens_by_hour.len() > 24 {
+        tokens_by_hour = tokens_by_hour.split_off(tokens_by_hour.len() - 24);
     }
     
-    // Sort models by requests (descending)
+    // Build model usage stats
+    let mut model_map: std::collections::HashMap<String, (u64, u64)> = std::collections::HashMap::new();
+    for req in &history.requests {
+        let entry = model_map.entry(req.model.clone()).or_insert((0, 0));
+        entry.0 += 1; // requests
+        entry.1 += (req.tokens_in.unwrap_or(0) + req.tokens_out.unwrap_or(0)) as u64; // tokens
+    }
+    
+    let mut models: Vec<ModelUsage> = model_map
+        .into_iter()
+        .map(|(model, (requests, tokens))| ModelUsage { model, requests, tokens })
+        .collect();
     models.sort_by(|a, b| b.requests.cmp(&a.requests));
     
-    Ok(UsageStats {
+    UsageStats {
         total_requests,
         success_count,
         failure_count,
@@ -800,7 +758,7 @@ async fn get_usage_stats(state: State<'_, AppState>) -> Result<UsageStats, Strin
         tokens_by_day,
         requests_by_hour,
         tokens_by_hour,
-    })
+    }
 }
 
 // Get request history
@@ -2741,8 +2699,10 @@ pub struct LogEntry {
 #[serde(rename_all = "kebab-case")]
 struct LogsApiResponse {
     #[serde(default)]
+    #[allow(dead_code)]
     latest_timestamp: Option<i64>,
     #[serde(default)]
+    #[allow(dead_code)]
     line_count: Option<u32>,
     #[serde(default)]
     lines: Vec<String>,

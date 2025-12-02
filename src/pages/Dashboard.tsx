@@ -1,14 +1,9 @@
-import { createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { createSignal, onCleanup, onMount, Show, For } from "solid-js";
 import { Button } from "../components/ui";
 import { StatusIndicator } from "../components/StatusIndicator";
 import { ApiEndpoint } from "../components/ApiEndpoint";
-import { UsageSummary } from "../components/UsageSummary";
-import { SavingsCard } from "../components/SavingsCard";
-import { GettingStartedEmptyState } from "../components/EmptyState";
 import { ThemeToggleCompact } from "../components/ThemeToggle";
-import { RequestMonitor } from "../components/RequestMonitor";
 import { HealthIndicator } from "../components/HealthIndicator";
-import { AgentSetup } from "../components/AgentSetup";
 import { openCommandPalette } from "../components/CommandPalette";
 import { appStore } from "../stores/app";
 import { toastStore } from "../stores/toast";
@@ -20,7 +15,11 @@ import {
   disconnectProvider,
   refreshAuthStatus,
   detectCliAgents,
+  getRequestHistory,
+  getUsageStats,
   type Provider,
+  type RequestHistory,
+  type UsageStats,
 } from "../lib/tauri";
 
 const providers = [
@@ -45,6 +44,176 @@ const providers = [
   },
 ];
 
+// Compact KPI tile
+function KpiTile(props: {
+  label: string;
+  value: string;
+  subtext?: string;
+  icon: "dollar" | "requests" | "tokens" | "success";
+  color: "green" | "blue" | "purple" | "emerald";
+  onClick?: () => void;
+}) {
+  const colors = {
+    green:
+      "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/50 text-green-700 dark:text-green-300",
+    blue: "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-300",
+    purple:
+      "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800/50 text-purple-700 dark:text-purple-300",
+    emerald:
+      "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300",
+  };
+
+  const icons = {
+    dollar: (
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
+      </svg>
+    ),
+    requests: (
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M13 10V3L4 14h7v7l9-11h-7z"
+        />
+      </svg>
+    ),
+    tokens: (
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
+        />
+      </svg>
+    ),
+    success: (
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
+      </svg>
+    ),
+  };
+
+  return (
+    <button
+      onClick={props.onClick}
+      class={`p-3 rounded-xl border text-left transition-all hover:scale-[1.02] ${colors[props.color]} ${props.onClick ? "cursor-pointer" : "cursor-default"}`}
+    >
+      <div class="flex items-center gap-1.5 mb-1 opacity-80">
+        {icons[props.icon]}
+        <span class="text-[10px] font-medium uppercase tracking-wider">
+          {props.label}
+        </span>
+      </div>
+      <p class="text-xl font-bold tabular-nums">{props.value}</p>
+      <Show when={props.subtext}>
+        <p class="text-[10px] opacity-70 mt-0.5">{props.subtext}</p>
+      </Show>
+    </button>
+  );
+}
+
+// Mini request feed (last 5)
+function MiniRequestFeed(props: {
+  requests: RequestHistory["requests"];
+  onViewAll: () => void;
+}) {
+  const recent = () => props.requests.slice(-5).reverse();
+
+  const formatTime = (ts: number) => {
+    const date = new Date(ts);
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const formatTokens = (n?: number) => {
+    if (!n) return "—";
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+    return n.toString();
+  };
+
+  return (
+    <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-2 border-b border-gray-100 dark:border-gray-700">
+        <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+          Recent Activity
+        </span>
+        <button
+          onClick={props.onViewAll}
+          class="text-xs text-brand-500 hover:text-brand-600 font-medium"
+        >
+          View all →
+        </button>
+      </div>
+      <Show
+        when={recent().length > 0}
+        fallback={
+          <div class="px-4 py-6 text-center text-sm text-gray-400 dark:text-gray-500">
+            No requests yet
+          </div>
+        }
+      >
+        <div class="divide-y divide-gray-100 dark:divide-gray-700">
+          <For each={recent()}>
+            {(req) => (
+              <div class="px-4 py-2 flex items-center gap-3 text-xs">
+                <span class="text-gray-400 dark:text-gray-500 tabular-nums w-12">
+                  {formatTime(req.timestamp)}
+                </span>
+                <span
+                  class={`px-1.5 py-0.5 rounded text-[10px] font-medium ${req.status < 400 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"}`}
+                >
+                  {req.status}
+                </span>
+                <span class="text-gray-700 dark:text-gray-300 truncate flex-1 font-mono">
+                  {req.model}
+                </span>
+                <span class="text-gray-400 dark:text-gray-500 tabular-nums">
+                  {formatTokens((req.tokensIn || 0) + (req.tokensOut || 0))}
+                </span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const {
     proxyStatus,
@@ -62,15 +231,28 @@ export function DashboardPage() {
   const [onboardingDismissed, setOnboardingDismissed] = createSignal(
     localStorage.getItem("proxypal-onboarding-dismissed") === "true",
   );
+  const [history, setHistory] = createSignal<RequestHistory>({
+    requests: [],
+    totalTokensIn: 0,
+    totalTokensOut: 0,
+    totalCostUsd: 0,
+  });
+  const [stats, setStats] = createSignal<UsageStats | null>(null);
 
-  // Check for configured agents
-  createEffect(() => {
-    detectCliAgents()
-      .then((agents) => {
-        const configured = agents.some((a) => a.configured);
-        setHasConfiguredAgent(configured);
-      })
-      .catch(console.error);
+  // Load data on mount
+  onMount(async () => {
+    try {
+      const [agents, hist, usage] = await Promise.all([
+        detectCliAgents(),
+        getRequestHistory(),
+        getUsageStats(),
+      ]);
+      setHasConfiguredAgent(agents.some((a) => a.configured));
+      setHistory(hist);
+      setStats(usage);
+    } catch (err) {
+      console.error("Failed to load dashboard data:", err);
+    }
   });
 
   const dismissOnboarding = () => {
@@ -78,16 +260,13 @@ export function DashboardPage() {
     setOnboardingDismissed(true);
   };
 
-  // Reset dismissed state if user disconnects all providers or hasn't completed setup
-  const shouldShowOnboarding = () => {
-    if (onboardingDismissed()) return false;
-    // Show if any step is incomplete
-    return !proxyStatus().running || !hasAnyProvider() || !hasConfiguredAgent();
-  };
+  const isSetupComplete = () =>
+    proxyStatus().running && hasAnyProvider() && hasConfiguredAgent();
+  const shouldShowOnboarding = () =>
+    !onboardingDismissed() && !isSetupComplete();
 
   const toggleProxy = async () => {
     if (toggling()) return;
-
     setToggling(true);
     try {
       if (proxyStatus().running) {
@@ -108,7 +287,6 @@ export function DashboardPage() {
   };
 
   const handleConnect = async (provider: Provider) => {
-    // Need proxy running for OAuth
     if (!proxyStatus().running) {
       toastStore.warning(
         "Start proxy first",
@@ -116,7 +294,6 @@ export function DashboardPage() {
       );
       return;
     }
-
     setConnecting(provider);
     toastStore.info(
       `Connecting to ${provider}...`,
@@ -124,26 +301,19 @@ export function DashboardPage() {
     );
 
     try {
-      // Open OAuth flow and get state for polling
       const oauthState = await openOAuth(provider);
-
-      // Poll for completion
       let attempts = 0;
-      const maxAttempts = 120; // 2 minutes max
+      const maxAttempts = 120;
       const pollInterval = setInterval(async () => {
         attempts++;
         try {
           const completed = await pollOAuthStatus(oauthState);
           if (completed) {
             clearInterval(pollInterval);
-            // Refresh auth status from CLIProxyAPI's auth directory
             const newAuth = await refreshAuthStatus();
             setAuthStatus(newAuth);
             setConnecting(null);
-
-            // Add to recently connected for animation
             setRecentlyConnected((prev) => new Set([...prev, provider]));
-            // Remove from recently connected after animation
             setTimeout(() => {
               setRecentlyConnected((prev) => {
                 const next = new Set(prev);
@@ -151,7 +321,6 @@ export function DashboardPage() {
                 return next;
               });
             }, 2000);
-
             toastStore.success(
               `${provider} connected!`,
               "You can now use this provider",
@@ -165,8 +334,6 @@ export function DashboardPage() {
           console.error("Poll error:", err);
         }
       }, 1000);
-
-      // Cleanup on component unmount
       onCleanup(() => clearInterval(pollInterval));
     } catch (error) {
       console.error("Failed to start OAuth:", error);
@@ -187,23 +354,30 @@ export function DashboardPage() {
     }
   };
 
-  const connectedProviders = () => {
-    const status = authStatus();
-    return providers.filter((p) => status[p.provider]);
-  };
-
-  const disconnectedProviders = () => {
-    const status = authStatus();
-    return providers.filter((p) => !status[p.provider]);
-  };
-
+  const connectedProviders = () =>
+    providers.filter((p) => authStatus()[p.provider]);
+  const disconnectedProviders = () =>
+    providers.filter((p) => !authStatus()[p.provider]);
   const hasAnyProvider = () => connectedProviders().length > 0;
 
+  // Format helpers
+  const formatCost = (n: number) => (n < 0.01 ? "$0.00" : `$${n.toFixed(2)}`);
+  const formatTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return n.toString();
+  };
+  const successRate = () => {
+    const s = stats();
+    if (!s || s.totalRequests === 0) return 100;
+    return Math.round((s.successCount / s.totalRequests) * 100);
+  };
+
   return (
-    <div class="min-h-screen flex flex-col">
+    <div class="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       {/* Header */}
-      <header class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-800">
-        <div class="flex items-center justify-between">
+      <header class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+        <div class="flex items-center justify-between max-w-3xl mx-auto">
           <div class="flex items-center gap-2 sm:gap-3">
             <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
               <span class="text-white text-lg sm:text-xl">⚡</span>
@@ -213,32 +387,11 @@ export function DashboardPage() {
                 ProxyPal
               </h1>
               <p class="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
-                Dashboard
+                AI Proxy Manager
               </p>
             </div>
           </div>
           <div class="flex items-center gap-2 sm:gap-3">
-            {/* Command Palette Button - Mobile (icon only) */}
-            <button
-              onClick={openCommandPalette}
-              class="sm:hidden p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              title="Command Palette"
-            >
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-            </button>
-            {/* Command Palette Button - Desktop (with label) */}
             <button
               onClick={openCommandPalette}
               class="hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors"
@@ -257,7 +410,6 @@ export function DashboardPage() {
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                 />
               </svg>
-              <span class="text-xs">Search</span>
               <kbd class="px-1.5 py-0.5 text-[10px] font-medium bg-gray-200 dark:bg-gray-700 rounded">
                 ⌘K
               </kbd>
@@ -268,6 +420,26 @@ export function DashboardPage() {
               onToggle={toggleProxy}
               disabled={toggling()}
             />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCurrentPage("analytics")}
+              title="Analytics"
+            >
+              <svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                />
+              </svg>
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -299,129 +471,26 @@ export function DashboardPage() {
 
       {/* Main content */}
       <main class="flex-1 p-4 sm:p-6 overflow-y-auto">
-        <div class="max-w-3xl mx-auto space-y-4 sm:space-y-6 animate-stagger">
-          {/* Show Getting Started / Onboarding checklist */}
-          <Show
-            when={
-              shouldShowOnboarding() ||
-              (!onboardingDismissed() &&
-                hasAnyProvider() &&
-                hasConfiguredAgent())
-            }
-          >
-            <GettingStartedEmptyState
-              proxyRunning={proxyStatus().running}
-              onStart={toggleProxy}
-              onDismiss={dismissOnboarding}
-              hasProvider={hasAnyProvider()}
-              hasConfiguredAgent={hasConfiguredAgent()}
-            />
-          </Show>
-
-          {/* Savings Card - prominent value proposition */}
-          <Show when={hasAnyProvider()}>
-            <SavingsCard />
-          </Show>
-
-          {/* Usage Summary - quick stats */}
-          <Show when={hasAnyProvider()}>
-            <UsageSummary />
-          </Show>
-
-          {/* Agent Setup - moved up for better discoverability */}
-          <Show when={hasAnyProvider()}>
-            <AgentSetup />
-          </Show>
-
-          {/* API Endpoint - always show */}
-          <ApiEndpoint
-            endpoint={proxyStatus().endpoint}
-            running={proxyStatus().running}
-          />
-
-          {/* Request History */}
-          <RequestMonitor />
-
-          {/* Connected accounts - only show when has providers */}
-          <Show when={connectedProviders().length > 0}>
-            <div>
-              <h2 class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider mb-3">
-                Connected Accounts
-              </h2>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-stagger">
-                {connectedProviders().map((provider) => (
-                  <div
-                    class={`flex items-center gap-3 p-3 rounded-lg border group hover-lift transition-all duration-300 ${
-                      recentlyConnected().has(provider.provider)
-                        ? "bg-green-100 dark:bg-green-900/40 border-green-400 dark:border-green-600 animate-bounce-in"
-                        : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
-                    }`}
-                  >
-                    <div class="relative">
-                      <img
-                        src={provider.logo}
-                        alt={provider.name}
-                        class="w-6 h-6 rounded"
-                      />
-                      {recentlyConnected().has(provider.provider) && (
-                        <div class="absolute -right-1 -bottom-1 w-3.5 h-3.5 bg-green-500 rounded-full flex items-center justify-center animate-bounce-in">
-                          <svg
-                            class="w-2 h-2 text-white"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="3"
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        </div>
-                      )}
-                    </div>
-                    <span class="font-medium text-green-800 dark:text-green-300">
-                      {provider.name}
-                    </span>
-                    <div class="ml-auto flex items-center gap-2">
-                      <HealthIndicator provider={provider.provider} />
-                      <button
-                        class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity"
-                        onClick={() => handleDisconnect(provider.provider)}
-                        title="Disconnect"
-                      >
-                        <svg
-                          class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Show>
-
-          {/* Add accounts section */}
-          <Show when={disconnectedProviders().length > 0}>
-            <div>
-              <h2 class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider mb-3">
-                {hasAnyProvider() ? "Add More Accounts" : "Connect an Account"}
-              </h2>
-              <Show when={!proxyStatus().running}>
-                <div class="flex items-center gap-2 p-3 mb-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+        <div class="max-w-3xl mx-auto space-y-4">
+          {/* === ZONE 1: Hero / Activation === */}
+          <Show when={shouldShowOnboarding()}>
+            <div class="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-brand-50 to-purple-50 dark:from-brand-900/30 dark:to-purple-900/20 border border-brand-200 dark:border-brand-800/50">
+              <div class="flex items-start justify-between mb-4">
+                <div>
+                  <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">
+                    Get Started
+                  </h2>
+                  <p class="text-sm text-gray-600 dark:text-gray-400">
+                    Complete these steps to start saving
+                  </p>
+                </div>
+                <button
+                  onClick={dismissOnboarding}
+                  class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  title="Dismiss"
+                >
                   <svg
-                    class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0"
+                    class="w-5 h-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -430,61 +499,22 @@ export function DashboardPage() {
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                      d="M6 18L18 6M6 6l12 12"
                     />
                   </svg>
-                  <p class="text-sm text-amber-700 dark:text-amber-300">
-                    Start the proxy first to connect accounts
-                  </p>
-                  <button
-                    onClick={toggleProxy}
-                    class="ml-auto text-xs font-medium text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 underline underline-offset-2"
+                </button>
+              </div>
+              <div class="space-y-3">
+                {/* Step 1: Start Proxy */}
+                <div
+                  class={`flex items-center gap-3 p-3 rounded-xl border ${proxyStatus().running ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"}`}
+                >
+                  <div
+                    class={`w-8 h-8 rounded-full flex items-center justify-center ${proxyStatus().running ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-500"}`}
                   >
-                    Start now
-                  </button>
-                </div>
-              </Show>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-stagger">
-                {disconnectedProviders().map((provider) => (
-                  <button
-                    class="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-brand-500 hover-lift transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => handleConnect(provider.provider)}
-                    disabled={!proxyStatus().running || connecting() !== null}
-                  >
-                    <img
-                      src={provider.logo}
-                      alt={provider.name}
-                      class="w-6 h-6 rounded"
-                    />
-                    <span class="font-medium text-gray-700 dark:text-gray-300">
-                      {provider.name}
-                    </span>
-                    {connecting() === provider.provider ? (
-                      <span class="ml-auto flex items-center gap-2 text-xs text-gray-500">
-                        <svg
-                          class="w-3 h-3 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            class="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            stroke-width="4"
-                          />
-                          <path
-                            class="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          />
-                        </svg>
-                        Connecting
-                      </span>
-                    ) : (
+                    {proxyStatus().running ? (
                       <svg
-                        class="w-4 h-4 ml-auto text-gray-400"
+                        class="w-4 h-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -493,15 +523,308 @@ export function DashboardPage() {
                           stroke-linecap="round"
                           stroke-linejoin="round"
                           stroke-width="2"
-                          d="M12 4v16m8-8H4"
+                          d="M5 13l4 4L19 7"
                         />
                       </svg>
+                    ) : (
+                      "1"
                     )}
-                  </button>
-                ))}
+                  </div>
+                  <div class="flex-1">
+                    <p class="font-medium text-gray-900 dark:text-gray-100">
+                      Start the proxy
+                    </p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                      Enable the local proxy server
+                    </p>
+                  </div>
+                  <Show when={!proxyStatus().running}>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={toggleProxy}
+                      disabled={toggling()}
+                    >
+                      {toggling() ? "Starting..." : "Start"}
+                    </Button>
+                  </Show>
+                </div>
+                {/* Step 2: Connect Provider */}
+                <div
+                  class={`flex items-center gap-3 p-3 rounded-xl border ${hasAnyProvider() ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"}`}
+                >
+                  <div
+                    class={`w-8 h-8 rounded-full flex items-center justify-center ${hasAnyProvider() ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-500"}`}
+                  >
+                    {hasAnyProvider() ? (
+                      <svg
+                        class="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    ) : (
+                      "2"
+                    )}
+                  </div>
+                  <div class="flex-1">
+                    <p class="font-medium text-gray-900 dark:text-gray-100">
+                      Connect a provider
+                    </p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                      Link Claude, Gemini, or ChatGPT
+                    </p>
+                  </div>
+                  <Show when={!hasAnyProvider() && proxyStatus().running}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        const first = disconnectedProviders()[0];
+                        if (first) handleConnect(first.provider);
+                      }}
+                    >
+                      Connect
+                    </Button>
+                  </Show>
+                </div>
+                {/* Step 3: Configure Agent */}
+                <div
+                  class={`flex items-center gap-3 p-3 rounded-xl border ${hasConfiguredAgent() ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"}`}
+                >
+                  <div
+                    class={`w-8 h-8 rounded-full flex items-center justify-center ${hasConfiguredAgent() ? "bg-green-500 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-500"}`}
+                  >
+                    {hasConfiguredAgent() ? (
+                      <svg
+                        class="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    ) : (
+                      "3"
+                    )}
+                  </div>
+                  <div class="flex-1">
+                    <p class="font-medium text-gray-900 dark:text-gray-100">
+                      Configure an agent
+                    </p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                      Set up Cursor, Claude Code, etc.
+                    </p>
+                  </div>
+                  <Show when={!hasConfiguredAgent() && hasAnyProvider()}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setCurrentPage("settings")}
+                    >
+                      Setup
+                    </Button>
+                  </Show>
+                </div>
               </div>
             </div>
           </Show>
+
+          {/* === ZONE 2: Value Snapshot (KPIs) === */}
+          <Show
+            when={
+              history().requests.length > 0 ||
+              (stats() && stats()!.totalRequests > 0)
+            }
+          >
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiTile
+                label="Saved"
+                value={formatCost(history().totalCostUsd)}
+                subtext="estimated"
+                icon="dollar"
+                color="green"
+                onClick={() => setCurrentPage("analytics")}
+              />
+              <KpiTile
+                label="Requests"
+                value={formatTokens(
+                  stats()?.totalRequests || history().requests.length,
+                )}
+                subtext={`${stats()?.requestsToday || 0} today`}
+                icon="requests"
+                color="blue"
+                onClick={() => setCurrentPage("analytics")}
+              />
+              <KpiTile
+                label="Tokens"
+                value={formatTokens(
+                  (history().totalTokensIn || 0) +
+                    (history().totalTokensOut || 0),
+                )}
+                subtext="total"
+                icon="tokens"
+                color="purple"
+                onClick={() => setCurrentPage("analytics")}
+              />
+              <KpiTile
+                label="Success"
+                value={`${successRate()}%`}
+                subtext={`${stats()?.failureCount || 0} failed`}
+                icon="success"
+                color="emerald"
+                onClick={() => setCurrentPage("logs")}
+              />
+            </div>
+          </Show>
+
+          {/* === ZONE 3: Providers (Unified Card) === */}
+          <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+              <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Providers
+              </span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {connectedProviders().length} connected
+              </span>
+            </div>
+
+            {/* Connected providers */}
+            <Show when={connectedProviders().length > 0}>
+              <div class="p-3 border-b border-gray-100 dark:border-gray-700">
+                <div class="flex flex-wrap gap-2">
+                  <For each={connectedProviders()}>
+                    {(p) => (
+                      <div
+                        class={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${recentlyConnected().has(p.provider) ? "bg-green-100 dark:bg-green-900/40 border-green-400" : "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"} group`}
+                      >
+                        <img
+                          src={p.logo}
+                          alt={p.name}
+                          class="w-4 h-4 rounded"
+                        />
+                        <span class="text-sm font-medium text-green-800 dark:text-green-300">
+                          {p.name}
+                        </span>
+                        <HealthIndicator provider={p.provider} />
+                        <button
+                          onClick={() => handleDisconnect(p.provider)}
+                          class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity -mr-1"
+                          title="Disconnect"
+                        >
+                          <svg
+                            class="w-3.5 h-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+
+            {/* Add providers */}
+            <Show when={disconnectedProviders().length > 0}>
+              <div class="p-3">
+                <Show when={!proxyStatus().running}>
+                  <p class="text-xs text-amber-600 dark:text-amber-400 mb-2">
+                    Start proxy to connect providers
+                  </p>
+                </Show>
+                <div class="flex flex-wrap gap-2">
+                  <For each={disconnectedProviders()}>
+                    {(p) => (
+                      <button
+                        onClick={() => handleConnect(p.provider)}
+                        disabled={
+                          !proxyStatus().running || connecting() !== null
+                        }
+                        class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <img
+                          src={p.logo}
+                          alt={p.name}
+                          class="w-4 h-4 rounded opacity-60"
+                        />
+                        <span class="text-sm text-gray-600 dark:text-gray-400">
+                          {p.name}
+                        </span>
+                        {connecting() === p.provider ? (
+                          <svg
+                            class="w-3 h-3 animate-spin text-gray-400"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              class="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              stroke-width="4"
+                            />
+                            <path
+                              class="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            class="w-3 h-3 text-gray-400"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M12 4v16m8-8H4"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          </div>
+
+          {/* === ZONE 4: API Endpoint === */}
+          <ApiEndpoint
+            endpoint={proxyStatus().endpoint}
+            running={proxyStatus().running}
+          />
+
+          {/* === ZONE 5: Mini Request Feed === */}
+          <MiniRequestFeed
+            requests={history().requests}
+            onViewAll={() => setCurrentPage("logs")}
+          />
         </div>
       </main>
     </div>

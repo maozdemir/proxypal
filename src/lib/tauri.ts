@@ -308,6 +308,7 @@ export interface UsageStats {
 }
 
 export async function getUsageStats(): Promise<UsageStats> {
+  // get_usage_stats now computes from local history, no longer needs proxy running
   return invoke("get_usage_stats");
 }
 

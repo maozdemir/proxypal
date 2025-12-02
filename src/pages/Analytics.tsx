@@ -185,19 +185,13 @@ function LineChart(props: {
 }
 
 export function Analytics() {
-  const { proxyStatus, setCurrentPage } = appStore;
+  const { setCurrentPage } = appStore;
   const [stats, setStats] = createSignal<UsageStats | null>(null);
   const [loading, setLoading] = createSignal(true);
   const [timeRange, setTimeRange] = createSignal<TimeRange>("day");
   const [refreshing, setRefreshing] = createSignal(false);
 
   const fetchStats = async () => {
-    if (!proxyStatus().running) {
-      setStats(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       setRefreshing(true);
       const data = await getUsageStats();
@@ -211,13 +205,8 @@ export function Analytics() {
   };
 
   // Fetch on mount
-  createEffect(() => {
-    if (proxyStatus().running) {
-      fetchStats();
-    } else {
-      setStats(null);
-      setLoading(false);
-    }
+  onMount(() => {
+    fetchStats();
   });
 
   // Chart data based on time range
@@ -296,7 +285,7 @@ export function Analytics() {
           <div class="flex items-center gap-2">
             <button
               onClick={fetchStats}
-              disabled={refreshing() || !proxyStatus().running}
+              disabled={refreshing()}
               class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
             >
               <svg
@@ -317,8 +306,8 @@ export function Analytics() {
           </div>
         </div>
 
-        {/* Proxy not running state */}
-        <Show when={!proxyStatus().running}>
+        {/* Empty state - no requests yet */}
+        <Show when={!loading() && (!stats() || stats()!.totalRequests === 0)}>
           <div class="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <svg
               class="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4"
@@ -334,16 +323,16 @@ export function Analytics() {
               />
             </svg>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Proxy Not Running
+              No Usage Data Yet
             </h3>
             <p class="text-gray-500 dark:text-gray-400">
-              Start the proxy to view usage analytics
+              Analytics will appear after you make requests through the proxy
             </p>
           </div>
         </Show>
 
         {/* Loading state */}
-        <Show when={loading() && proxyStatus().running}>
+        <Show when={loading()}>
           <div class="grid grid-cols-4 gap-4">
             <For each={[1, 2, 3, 4]}>
               {() => (
@@ -355,7 +344,7 @@ export function Analytics() {
         </Show>
 
         {/* Stats content */}
-        <Show when={!loading() && stats() && proxyStatus().running}>
+        <Show when={!loading() && stats() && stats()!.totalRequests > 0}>
           {/* Overview cards */}
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             <div class="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50">
