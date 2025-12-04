@@ -1345,11 +1345,22 @@ async fn get_available_models(state: State<'_, AppState>) -> Result<Vec<Availabl
     
     let endpoint = format!("http://localhost:{}/v1/models", config.port);
     
-    let response = client.get(&endpoint)
+    let response = match client.get(&endpoint)
         .header("Authorization", "Bearer proxypal-local")
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch models: {}", e))?;
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            // Connection error - proxy might have crashed
+            // Update state to reflect proxy is not running
+            {
+                let mut status = state.proxy_status.lock().unwrap();
+                status.running = false;
+            }
+            return Err(format!("Proxy not responding. Please restart the proxy. ({})", e));
+        }
+    };
     
     if !response.status().is_success() {
         return Err(format!("API returned status {}", response.status()));
