@@ -1236,24 +1236,42 @@ async fn start_copilot(
         }
     });
     
-    // Give it a moment to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    // Give it a moment to start, then poll for authentication
+    // copilot-api typically takes 2-4 seconds to fully authenticate
+    let mut authenticated = false;
+    for _ in 0..6 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        // Check if stdout listener already detected authentication
+        {
+            let status = state.copilot_status.lock().unwrap();
+            if status.authenticated {
+                authenticated = true;
+                break;
+            }
+        }
+        
+        // Also check health endpoint
+        if let Ok(response) = client
+            .get(&health_url)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+        {
+            if response.status().is_success() {
+                authenticated = true;
+                break;
+            }
+        }
+    }
     
-    // Check if copilot-api is responding
-    let authenticated = match client
-        .get(&health_url)
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await
-    {
-        Ok(response) => response.status().is_success(),
-        Err(_) => false,
-    };
-    
-    // Update status
+    // Update status - only upgrade authenticated status, don't downgrade
+    // (stdout listener may have already set authenticated = true)
     let new_status = {
         let mut status = state.copilot_status.lock().unwrap();
-        status.authenticated = authenticated;
+        if authenticated && !status.authenticated {
+            status.authenticated = true;
+        }
         status.clone()
     };
     
