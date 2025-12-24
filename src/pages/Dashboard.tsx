@@ -9,11 +9,13 @@ import { StatusIndicator } from "../components/StatusIndicator";
 import { Button } from "../components/ui";
 import {
 	type AgentConfigResult,
+	type AntigravityQuotaResult,
 	type AvailableModel,
 	appendToShellProfile,
 	type CopilotConfig,
 	detectCliAgents,
 	disconnectProvider,
+	fetchAntigravityQuota,
 	getUsageStats,
 	importVertexCredential,
 	onRequestLog,
@@ -52,26 +54,45 @@ const providers = [
 	},
 ];
 
-// Compact KPI tile
+// Compact KPI tile - matches Analytics StatCard styling
 function KpiTile(props: {
 	label: string;
 	value: string;
 	subtext?: string;
-	icon: "dollar" | "requests" | "tokens" | "success";
-	color: "green" | "blue" | "purple" | "emerald";
+	icon: "bolt" | "check" | "dollar";
 	onClick?: () => void;
 }) {
-	const colors = {
-		green:
-			"bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/50 text-green-700 dark:text-green-300",
-		blue: "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-300",
-		purple:
-			"bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800/50 text-purple-700 dark:text-purple-300",
-		emerald:
-			"bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300",
-	};
-
 	const icons = {
+		bolt: (
+			<svg
+				class="w-4 h-4"
+				fill="none"
+				stroke="currentColor"
+				viewBox="0 0 24 24"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M13 10V3L4 14h7v7l9-11h-7z"
+				/>
+			</svg>
+		),
+		check: (
+			<svg
+				class="w-4 h-4"
+				fill="none"
+				stroke="currentColor"
+				viewBox="0 0 24 24"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+				/>
+			</svg>
+		),
 		dollar: (
 			<svg
 				class="w-4 h-4"
@@ -87,57 +108,12 @@ function KpiTile(props: {
 				/>
 			</svg>
 		),
-		requests: (
-			<svg
-				class="w-4 h-4"
-				fill="none"
-				stroke="currentColor"
-				viewBox="0 0 24 24"
-			>
-				<path
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					stroke-width="2"
-					d="M13 10V3L4 14h7v7l9-11h-7z"
-				/>
-			</svg>
-		),
-		tokens: (
-			<svg
-				class="w-4 h-4"
-				fill="none"
-				stroke="currentColor"
-				viewBox="0 0 24 24"
-			>
-				<path
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					stroke-width="2"
-					d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"
-				/>
-			</svg>
-		),
-		success: (
-			<svg
-				class="w-4 h-4"
-				fill="none"
-				stroke="currentColor"
-				viewBox="0 0 24 24"
-			>
-				<path
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					stroke-width="2"
-					d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-				/>
-			</svg>
-		),
 	};
 
 	return (
 		<button
 			onClick={props.onClick}
-			class={`p-3 rounded-xl border text-left transition-all hover:scale-[1.02] ${colors[props.color]} ${props.onClick ? "cursor-pointer" : "cursor-default"}`}
+			class={`p-3 rounded-xl border text-left transition-all hover:scale-[1.02] hover:shadow-md bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-700 dark:text-blue-300 ${props.onClick ? "cursor-pointer" : "cursor-default"}`}
 		>
 			<div class="flex items-center gap-1.5 mb-1 opacity-80">
 				{icons[props.icon]}
@@ -416,22 +392,21 @@ export function DashboardPage() {
 	};
 
 	// Format helpers
-	const formatCost = (n: number) => (n < 0.01 ? "$0.00" : `$${n.toFixed(2)}`);
+	const formatCost = (n: number) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
 	const formatTokens = (n: number) => {
 		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
 		return n.toString();
 	};
-	const successRate = () => {
+
+	// Estimated cost calculation (same as Analytics)
+	const estimatedCost = () => {
 		const s = stats();
-		if (!s || s.totalRequests === 0) {
-			// Fallback to history if stats unavailable
-			const total = history().requests.length;
-			if (total === 0) return 100;
-			const successes = history().requests.filter((r) => r.status < 400).length;
-			return Math.round((successes / total) * 100);
-		}
-		return Math.round((s.successCount / s.totalRequests) * 100);
+		if (!s) return 0;
+		// Average pricing: ~$3/1M input, ~$15/1M output (blended across models)
+		const inputCost = (s.inputTokens / 1_000_000) * 3;
+		const outputCost = (s.outputTokens / 1_000_000) * 15;
+		return inputCost + outputCost;
 	};
 
 	// Model grouping helpers
@@ -665,48 +640,36 @@ export function DashboardPage() {
 						</div>
 					</Show>
 
-					{/* === ZONE 2: Value Snapshot (KPIs) === */}
+					{/* === ZONE 2: Value Snapshot (KPIs) - 3-card layout matching Analytics === */}
 					<Show
 						when={
 							history().requests.length > 0 ||
 							(stats() && stats()!.totalRequests > 0)
 						}
 					>
-						<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+						<div class="grid grid-cols-3 gap-3">
 							<KpiTile
-								label="Saved"
-								value={formatCost(history().totalCostUsd)}
-								subtext="estimated"
-								icon="dollar"
-								color="green"
-								onClick={() => setCurrentPage("analytics")}
-							/>
-							<KpiTile
-								label="Requests"
-								value={formatTokens(history().requests.length)}
-								subtext={`${stats()?.requestsToday || 0} today`}
-								icon="requests"
-								color="blue"
-								onClick={() => setCurrentPage("analytics")}
-							/>
-							<KpiTile
-								label="Tokens"
+								label="Total Requests"
 								value={formatTokens(
-									(history().totalTokensIn || 0) +
-										(history().totalTokensOut || 0),
+									stats()?.totalRequests || history().requests.length,
 								)}
-								subtext="total"
-								icon="tokens"
-								color="purple"
+								subtext={`${stats()?.requestsToday || 0} today`}
+								icon="bolt"
 								onClick={() => setCurrentPage("analytics")}
 							/>
 							<KpiTile
-								label="Success"
-								value={`${successRate()}%`}
+								label="Success Rate"
+								value={`${stats() && stats()!.totalRequests > 0 ? Math.round((stats()!.successCount / stats()!.totalRequests) * 100) : 100}%`}
 								subtext={`${stats()?.failureCount || 0} failed`}
-								icon="success"
-								color="emerald"
-								onClick={() => setCurrentPage("logs")}
+								icon="check"
+								onClick={() => setCurrentPage("analytics")}
+							/>
+							<KpiTile
+								label="Est. Cost"
+								value={formatCost(estimatedCost())}
+								subtext={`${formatTokens(stats()?.totalTokens || 0)} tokens`}
+								icon="dollar"
+								onClick={() => setCurrentPage("analytics")}
 							/>
 						</div>
 					</Show>
@@ -885,7 +848,10 @@ export function DashboardPage() {
 						</Show>
 					</div>
 
-					{/* === ZONE 3.5: GitHub Copilot === */}
+					{/* === ZONE 3.5: Antigravity Quota === */}
+					<QuotaWidget authStatus={authStatus()} />
+
+					{/* === ZONE 3.6: GitHub Copilot === */}
 					<CopilotCard
 						config={config().copilot}
 						onConfigChange={handleCopilotConfigChange}
@@ -1044,6 +1010,257 @@ export function DashboardPage() {
 					</Show>
 				</div>
 			</main>
+		</div>
+	);
+}
+
+// Antigravity Quota Widget - shows remaining quota for each model
+function QuotaWidget(props: { authStatus: { antigravity: number } }) {
+	const [quotaData, setQuotaData] = createSignal<AntigravityQuotaResult[]>([]);
+	const [loading, setLoading] = createSignal(false);
+	const [error, setError] = createSignal<string | null>(null);
+	const [expanded, setExpanded] = createSignal(false);
+
+	const loadQuota = async () => {
+		setLoading(true);
+		setError(null);
+		try {
+			const results = await fetchAntigravityQuota();
+			setQuotaData(results);
+		} catch (err) {
+			setError(String(err));
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	// Load quota when component mounts and antigravity is connected
+	onMount(() => {
+		if (props.authStatus.antigravity > 0) {
+			loadQuota();
+		}
+	});
+
+	// Get color based on remaining percentage
+	const getQuotaColor = (percent: number) => {
+		if (percent >= 70) return "bg-green-500";
+		if (percent >= 30) return "bg-yellow-500";
+		return "bg-red-500";
+	};
+
+	const getQuotaTextColor = (percent: number) => {
+		if (percent >= 70) return "text-green-600 dark:text-green-400";
+		if (percent >= 30) return "text-yellow-600 dark:text-yellow-400";
+		return "text-red-600 dark:text-red-400";
+	};
+
+	// Don't show if no antigravity accounts
+	if (props.authStatus.antigravity === 0) return null;
+
+	return (
+		<div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+			<div
+				onClick={() => setExpanded(!expanded())}
+				class="w-full flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+			>
+				<div class="flex items-center gap-2">
+					<img
+						src="/logos/antigravity.webp"
+						alt="Antigravity"
+						class="w-5 h-5 rounded"
+					/>
+					<span class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+						Antigravity Quota
+					</span>
+					<Show when={quotaData().length > 0}>
+						<span class="text-xs text-gray-500 dark:text-gray-400">
+							({quotaData().length} account{quotaData().length !== 1 ? "s" : ""}
+							)
+						</span>
+					</Show>
+				</div>
+				<div class="flex items-center gap-2">
+					<button
+						onClick={(e) => {
+							e.stopPropagation();
+							loadQuota();
+						}}
+						disabled={loading()}
+						class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
+						title="Refresh quota"
+					>
+						<svg
+							class={`w-4 h-4 ${loading() ? "animate-spin" : ""}`}
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+							/>
+						</svg>
+					</button>
+					<svg
+						class={`w-4 h-4 text-gray-400 transition-transform ${expanded() ? "rotate-180" : ""}`}
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M19 9l-7 7-7-7"
+						/>
+					</svg>
+				</div>
+			</div>
+
+			<Show when={expanded()}>
+				<div class="p-4 space-y-4">
+					<Show when={loading() && quotaData().length === 0}>
+						<div class="flex items-center justify-center py-4 text-gray-500">
+							<svg
+								class="w-5 h-5 animate-spin mr-2"
+								fill="none"
+								viewBox="0 0 24 24"
+							>
+								<circle
+									class="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									stroke-width="4"
+								/>
+								<path
+									class="opacity-75"
+									fill="currentColor"
+									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+								/>
+							</svg>
+							Loading quota...
+						</div>
+					</Show>
+
+					<Show when={error()}>
+						<div class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+							<p class="text-sm text-red-700 dark:text-red-300">{error()}</p>
+						</div>
+					</Show>
+
+					<For each={quotaData()}>
+						{(account, index) => {
+							const [accountExpanded, setAccountExpanded] = createSignal(
+								index() === 0,
+							); // First account expanded by default
+							return (
+								<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+									<button
+										onClick={() => setAccountExpanded(!accountExpanded())}
+										class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+									>
+										<span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+											{account.accountEmail}
+										</span>
+										<div class="flex items-center gap-2">
+											<Show when={account.error}>
+												<span class="text-xs text-red-500">
+													{account.error}
+												</span>
+											</Show>
+											<Show when={!account.error}>
+												<span class="text-xs text-gray-500">
+													{account.quotas.length} models
+												</span>
+											</Show>
+											<svg
+												class={`w-4 h-4 text-gray-400 transition-transform ${accountExpanded() ? "rotate-180" : ""}`}
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M19 9l-7 7-7-7"
+												/>
+											</svg>
+										</div>
+									</button>
+
+									<Show
+										when={
+											accountExpanded() &&
+											!account.error &&
+											account.quotas.length > 0
+										}
+									>
+										<div class="p-3 space-y-2 bg-white dark:bg-gray-800">
+											<For each={account.quotas}>
+												{(quota) => (
+													<div class="space-y-1">
+														<div class="flex items-center justify-between text-xs">
+															<span class="text-gray-600 dark:text-gray-400">
+																{quota.displayName}
+															</span>
+															<span
+																class={getQuotaTextColor(
+																	quota.remainingPercent,
+																)}
+															>
+																{quota.remainingPercent.toFixed(0)}%
+															</span>
+														</div>
+														<div class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+															<div
+																class={`h-full ${getQuotaColor(quota.remainingPercent)} transition-all duration-300`}
+																style={{
+																	width: `${Math.min(100, quota.remainingPercent)}%`,
+																}}
+															/>
+														</div>
+														<Show when={quota.resetTime}>
+															<p class="text-[10px] text-gray-400">
+																Resets:{" "}
+																{new Date(quota.resetTime!).toLocaleString()}
+															</p>
+														</Show>
+													</div>
+												)}
+											</For>
+										</div>
+									</Show>
+
+									<Show
+										when={
+											accountExpanded() &&
+											!account.error &&
+											account.quotas.length === 0
+										}
+									>
+										<div class="p-3 bg-white dark:bg-gray-800">
+											<p class="text-xs text-gray-500">
+												No quota data available
+											</p>
+										</div>
+									</Show>
+								</div>
+							);
+						}}
+					</For>
+
+					<Show when={!loading() && quotaData().length === 0 && !error()}>
+						<p class="text-sm text-gray-500 text-center py-2">
+							No Antigravity accounts found
+						</p>
+					</Show>
+				</div>
+			</Show>
 		</div>
 	);
 }

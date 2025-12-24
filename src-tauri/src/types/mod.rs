@@ -8,6 +8,7 @@ pub mod health;
 pub mod logs;
 pub mod models;
 pub mod proxy;
+pub mod quota;
 pub mod settings;
 pub mod usage;
 
@@ -21,5 +22,6 @@ pub use health::*;
 pub use logs::*;
 pub use models::*;
 pub use proxy::*;
+pub use quota::*;
 pub use settings::*;
 pub use usage::*;

@@ -9,6 +9,7 @@ const [requestHistory, setRequestHistory] = createSignal<RequestHistory>({
 	requests: [],
 	totalTokensIn: 0,
 	totalTokensOut: 0,
+	totalTokensCached: 0,
 	totalCostUsd: 0,
 });
 
@@ -100,6 +101,7 @@ export function clearHistory(): void {
 		requests: [],
 		totalTokensIn: 0,
 		totalTokensOut: 0,
+		totalTokensCached: 0,
 		totalCostUsd: 0,
 	});
 }

@@ -1,6 +1,6 @@
 [package]
 name = "proxypal"
-version = "0.3.6"
+version = "0.3.7"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -33,7 +33,7 @@ tokio = { version = "1", features = ["process", "io-util", "sync", "time"] }
 dirs = "5"
 rand = "0.8"
 url = "2"
-reqwest = { version = "0.12", features = ["json", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "blocking"] }
 chrono = "0.4"
 regex = "1"
 lazy_static = "1"

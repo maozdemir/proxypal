@@ -9,8 +9,6 @@ import {
 	Show,
 } from "solid-js";
 import {
-	BarChart,
-	type BarChartData,
 	DonutChart,
 	type DonutChartData,
 	GaugeChart,
@@ -88,10 +86,10 @@ function MiniBarChart(props: { value: number; max: number; color: string }) {
 	);
 }
 
-// Chart.js wrapper component for SolidJS
+// Chart.js wrapper component for SolidJS - uses accessor functions for reactivity
 function LineChart(props: {
-	labels: string[];
-	data: number[];
+	getLabels: () => string[];
+	getData: () => number[];
 	label: string;
 	color: string;
 	fillColor: string;
@@ -114,14 +112,17 @@ function LineChart(props: {
 			? "rgba(75, 85, 99, 0.3)"
 			: "rgba(209, 213, 219, 0.5)";
 
+		const labels = props.getLabels().slice(-50);
+		const data = props.getData().slice(-50);
+
 		chartInstance = new Chart(canvasRef, {
 			type: "line",
 			data: {
-				labels: props.labels.slice(-50), // Limit to last 50 points for performance
+				labels,
 				datasets: [
 					{
 						label: props.label,
-						data: props.data.slice(-50), // Limit to last 50 points
+						data,
 						borderColor: props.color,
 						backgroundColor: props.fillColor,
 						fill: true,
@@ -135,7 +136,7 @@ function LineChart(props: {
 				responsive: true,
 				maintainAspectRatio: false,
 				animation: {
-					duration: 300, // Faster animations
+					duration: 300,
 				},
 				plugins: {
 					legend: {
@@ -187,12 +188,12 @@ function LineChart(props: {
 		createChart();
 	});
 
-	// Update chart when data changes
+	// Update chart when accessor data changes
 	createEffect(() => {
-		// Access props to track changes
-		const labels = props.labels.slice(-50); // Limit to last 50 points
-		const data = props.data.slice(-50);
-		if (chartInstance && labels && data) {
+		const labels = props.getLabels().slice(-50);
+		const data = props.getData().slice(-50);
+
+		if (chartInstance && labels.length > 0) {
 			chartInstance.data.labels = labels;
 			chartInstance.data.datasets[0].data = data;
 			chartInstance.update("none");
@@ -204,7 +205,6 @@ function LineChart(props: {
 			chartInstance.destroy();
 			chartInstance = null;
 		}
-		// Reset canvas to release memory (Windows WebView2 fix)
 		if (canvasRef) {
 			const ctx = canvasRef.getContext("2d");
 			if (ctx) {
@@ -345,24 +345,95 @@ export function Analytics() {
 		fetchStats();
 	});
 
-	// Chart data based on time range
+	// Filter data by date preset and fill in missing days/hours with zeros
+	const filterByDatePreset = (
+		data: { label: string; value: number }[],
+		isHourly: boolean = false,
+	): { label: string; value: number }[] => {
+		const preset = datePreset();
+		if (preset === "all") return data;
+
+		const now = new Date();
+		let numDays: number;
+
+		switch (preset) {
+			case "24h":
+				numDays = 1;
+				break;
+			case "7d":
+				numDays = 7;
+				break;
+			case "14d":
+				numDays = 14;
+				break;
+			case "30d":
+				numDays = 30;
+				break;
+			default:
+				return data;
+		}
+
+		// Create a map of existing data points
+		const dataMap = new Map<string, number>();
+		for (const point of data) {
+			dataMap.set(point.label, point.value);
+		}
+
+		// Generate all expected time slots and fill with data or zeros
+		const result: { label: string; value: number }[] = [];
+
+		if (isHourly && preset === "24h") {
+			// For 24h view, generate hourly slots
+			for (let i = 23; i >= 0; i--) {
+				const slotDate = new Date(now.getTime() - i * 60 * 60 * 1000);
+				const year = slotDate.getFullYear();
+				const month = String(slotDate.getMonth() + 1).padStart(2, "0");
+				const day = String(slotDate.getDate()).padStart(2, "0");
+				const hour = String(slotDate.getHours()).padStart(2, "0");
+				const label = `${year}-${month}-${day}T${hour}`;
+				result.push({ label, value: dataMap.get(label) || 0 });
+			}
+		} else {
+			// For day views, generate daily slots
+			for (let i = numDays - 1; i >= 0; i--) {
+				const slotDate = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+				const year = slotDate.getFullYear();
+				const month = String(slotDate.getMonth() + 1).padStart(2, "0");
+				const day = String(slotDate.getDate()).padStart(2, "0");
+				const label = `${year}-${month}-${day}`;
+				result.push({ label, value: dataMap.get(label) || 0 });
+			}
+		}
+
+		return result;
+	};
+
+	// Chart data based on time range and date preset
 	const requestsChartData = () => {
 		const s = stats();
 		if (!s) return { labels: [], data: [] };
-		const rawData = timeRange() === "hour" ? s.requestsByHour : s.requestsByDay;
+
+		// 24h uses hourly data, others use daily data
+		const isHourly = timeRange() === "hour";
+		const rawData = isHourly ? s.requestsByHour : s.requestsByDay;
+		const filteredData = filterByDatePreset(rawData, isHourly);
 		return {
-			labels: rawData.map((p) => formatLabel(p.label, timeRange())),
-			data: rawData.map((p) => p.value),
+			labels: filteredData.map((p) => formatLabel(p.label, timeRange())),
+			data: filteredData.map((p) => p.value),
 		};
 	};
 
 	const tokensChartData = () => {
 		const s = stats();
 		if (!s) return { labels: [], data: [] };
-		const rawData = timeRange() === "hour" ? s.tokensByHour : s.tokensByDay;
+
+		// 24h uses hourly data, others use daily data
+		const isHourly = timeRange() === "hour";
+		const rawData = isHourly ? s.tokensByHour : s.tokensByDay;
+		const filteredData = filterByDatePreset(rawData, isHourly);
 		return {
-			labels: rawData.map((p) => formatLabel(p.label, timeRange())),
-			data: rawData.map((p) => p.value),
+			labels: filteredData.map((p) => formatLabel(p.label, timeRange())),
+			data: filteredData.map((p) => p.value),
 		};
 	};
 
@@ -395,25 +466,13 @@ export function Analytics() {
 	// Privacy blur class
 	const blurClass = () => (privacyMode() ? "blur-sm select-none" : "");
 
-	// Provider donut chart data
+	// Provider donut chart data - now uses model data for more detailed breakdown
 	const providerDonutData = createMemo((): DonutChartData[] => {
-		const s = stats();
-		if (!s) return [];
-		return s.providers
-			.filter((p) => p.provider !== "unknown" && p.provider !== "")
-			.map((p) => ({
-				name: p.provider,
-				value: p.requests,
-			}));
-	});
-
-	// Model bar chart data
-	const modelBarData = createMemo((): BarChartData[] => {
 		const s = stats();
 		if (!s) return [];
 		return s.models
 			.filter((m) => m.model !== "unknown" && m.model !== "")
-			.slice(0, 7)
+			.slice(0, 10) // Limit to top 10 for better visualization
 			.map((m) => ({
 				name: m.model,
 				value: m.requests,
@@ -622,8 +681,8 @@ export function Analytics() {
 
 				{/* Stats content */}
 				<Show when={!loading() && stats() && stats()!.totalRequests > 0}>
-					{/* Overview cards */}
-					<div class="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
+					{/* Overview cards - 3 essential metrics */}
+					<div class="grid grid-cols-3 gap-3 sm:gap-4">
 						<StatCard
 							title="Total Requests"
 							value={formatNumber(stats()!.totalRequests)}
@@ -634,35 +693,17 @@ export function Analytics() {
 						<StatCard
 							title="Success Rate"
 							value={`${successRate()}%`}
-							subtitle={`${formatNumber(stats()!.successCount)} successful`}
+							subtitle={`${formatNumber(stats()!.failureCount)} failed`}
 							icon="check"
-							colorClass="bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800/50 text-green-700 dark:text-green-300"
+							colorClass="bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-700 dark:text-blue-300"
 						/>
-						<div class={blurClass()}>
-							<StatCard
-								title="Total Tokens"
-								value={formatTokens(stats()!.totalTokens)}
-								subtitle={`${formatTokens(stats()!.inputTokens)} in / ${formatTokens(stats()!.outputTokens)} out`}
-								icon="tokens"
-								colorClass="bg-purple-50 dark:bg-purple-900/20 border-purple-100 dark:border-purple-800/50 text-purple-700 dark:text-purple-300"
-							/>
-						</div>
-						<div class={blurClass()}>
-							<StatCard
-								title="Today's Tokens"
-								value={formatTokens(stats()!.tokensToday)}
-								subtitle={`${formatNumber(stats()!.requestsToday)} requests`}
-								icon="flow"
-								colorClass="bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-800/50 text-orange-700 dark:text-orange-300"
-							/>
-						</div>
 						<div class={blurClass()}>
 							<StatCard
 								title="Est. Cost"
 								value={formatCost(estimatedCost())}
-								subtitle="Based on avg. pricing"
+								subtitle={`${formatTokens(stats()!.totalTokens)} tokens`}
 								icon="bolt"
-								colorClass="bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300"
+								colorClass="bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/50 text-blue-700 dark:text-blue-300"
 							/>
 						</div>
 					</div>
@@ -689,12 +730,12 @@ export function Analytics() {
 								</h2>
 							</div>
 
-							{/* Requests chart */}
-							<Show when={requestsChartData().data.length > 0}>
+							{/* Requests chart - keyed by datePreset to force re-render */}
+							<Show when={requestsChartData().data.length > 0} keyed>
 								<div class="h-48 sm:h-64">
 									<LineChart
-										labels={requestsChartData().labels}
-										data={requestsChartData().data}
+										getLabels={() => requestsChartData().labels}
+										getData={() => requestsChartData().data}
 										label="Requests"
 										color="rgb(59, 130, 246)"
 										fillColor="rgba(59, 130, 246, 0.1)"
@@ -707,7 +748,7 @@ export function Analytics() {
 								<div class="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700">
 									<div class="flex items-center gap-2 mb-4">
 										<svg
-											class="w-5 h-5 text-purple-500"
+											class="w-5 h-5 text-blue-500"
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
@@ -725,11 +766,11 @@ export function Analytics() {
 									</div>
 									<div class="h-48 sm:h-64">
 										<LineChart
-											labels={tokensChartData().labels}
-											data={tokensChartData().data}
+											getLabels={() => tokensChartData().labels}
+											getData={() => tokensChartData().data}
 											label="Tokens"
-											color="rgb(168, 85, 247)"
-											fillColor="rgba(168, 85, 247, 0.1)"
+											color="rgb(59, 130, 246)"
+											fillColor="rgba(59, 130, 246, 0.1)"
 										/>
 									</div>
 								</div>
@@ -774,7 +815,7 @@ export function Analytics() {
 						<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sm:p-6 shadow-sm">
 							<div class="flex items-center gap-2 mb-4">
 								<svg
-									class="w-5 h-5 text-indigo-500"
+									class="w-5 h-5 text-blue-500"
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
@@ -803,6 +844,11 @@ export function Analytics() {
 											<th class="pb-3">Model</th>
 											<th class="pb-3 text-right">Requests</th>
 											<th class="pb-3 text-right">Tokens</th>
+											<th class="pb-3 text-right hidden md:table-cell">In</th>
+											<th class="pb-3 text-right hidden md:table-cell">Out</th>
+											<th class="pb-3 text-right hidden lg:table-cell">
+												Cache
+											</th>
 											<th class="pb-3 w-32 hidden sm:table-cell">Usage</th>
 										</tr>
 									</thead>
@@ -829,6 +875,15 @@ export function Analytics() {
 													</td>
 													<td class="py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
 														{formatTokens(model.tokens)}
+													</td>
+													<td class="py-3 text-right tabular-nums text-gray-600 dark:text-gray-400 hidden md:table-cell">
+														{formatTokens(model.inputTokens)}
+													</td>
+													<td class="py-3 text-right tabular-nums text-gray-600 dark:text-gray-400 hidden md:table-cell">
+														{formatTokens(model.outputTokens)}
+													</td>
+													<td class="py-3 text-right tabular-nums text-gray-600 dark:text-gray-400 hidden lg:table-cell">
+														{formatTokens(model.cachedTokens)}
 													</td>
 													<td class="py-3 hidden sm:table-cell">
 														<MiniBarChart
@@ -863,14 +918,47 @@ export function Analytics() {
 						</div>
 					</Show>
 
-					{/* Provider Breakdown - Donut Chart */}
-					<Show when={providerDonutData().length > 0}>
-						<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-							{/* Provider Donut Chart */}
+					{/* Model Breakdown - Donut Chart */}
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+						{/* Model Donut Chart */}
+						<Show
+							when={providerDonutData().length > 0}
+							fallback={
+								<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sm:p-6 shadow-sm">
+									<div class="flex items-center gap-2 mb-4">
+										<svg
+											class="w-5 h-5 text-blue-500"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"
+											/>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"
+											/>
+										</svg>
+										<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
+											Model Breakdown
+										</h2>
+									</div>
+									<div class="h-64 flex items-center justify-center text-gray-400 dark:text-gray-500">
+										No model data available
+									</div>
+								</div>
+							}
+						>
 							<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sm:p-6 shadow-sm">
 								<div class="flex items-center gap-2 mb-4">
 									<svg
-										class="w-5 h-5 text-cyan-500"
+										class="w-5 h-5 text-blue-500"
 										fill="none"
 										stroke="currentColor"
 										viewBox="0 0 24 24"
@@ -889,7 +977,7 @@ export function Analytics() {
 										/>
 									</svg>
 									<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
-										Provider Breakdown
+										Model Breakdown
 									</h2>
 								</div>
 								<div class="h-64">
@@ -900,12 +988,14 @@ export function Analytics() {
 									/>
 								</div>
 							</div>
+						</Show>
 
-							{/* Success Rate Gauge */}
+						{/* Success Rate Gauge - always show when stats available */}
+						<Show when={stats()}>
 							<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sm:p-6 shadow-sm">
 								<div class="flex items-center gap-2 mb-4">
 									<svg
-										class="w-5 h-5 text-green-500"
+										class="w-5 h-5 text-blue-500"
 										fill="none"
 										stroke="currentColor"
 										viewBox="0 0 24 24"
@@ -925,52 +1015,15 @@ export function Analytics() {
 									<GaugeChart value={successRate()} />
 								</div>
 							</div>
-						</div>
-					</Show>
-
-					{/* Model Usage - Bar Chart */}
-					<Show when={modelBarData().length > 0}>
-						<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sm:p-6 shadow-sm">
-							<div class="flex items-center gap-2 mb-4">
-								<svg
-									class="w-5 h-5 text-indigo-500"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"
-									/>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"
-									/>
-								</svg>
-								<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">
-									Model Usage
-								</h2>
-							</div>
-							<div class="h-72">
-								<BarChart
-									data={modelBarData()}
-									valueLabel="Requests"
-									horizontal={true}
-								/>
-							</div>
-						</div>
-					</Show>
+						</Show>
+					</div>
 
 					{/* Activity Heatmap */}
 					<Show when={heatmapData().length > 0}>
 						<div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sm:p-6 shadow-sm">
 							<div class="flex items-center gap-2 mb-4">
 								<svg
-									class="w-5 h-5 text-orange-500"
+									class="w-5 h-5 text-blue-500"
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"

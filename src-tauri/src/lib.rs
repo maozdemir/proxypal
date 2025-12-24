@@ -181,6 +181,9 @@ fn update_model_stats(agg: &mut Aggregate, req: &RequestLog) {
         entry.success_count += 1;
     }
     entry.tokens += (req.tokens_in.unwrap_or(0) + req.tokens_out.unwrap_or(0)) as u64;
+    entry.input_tokens += req.tokens_in.unwrap_or(0) as u64;
+    entry.output_tokens += req.tokens_out.unwrap_or(0) as u64;
+    entry.cached_tokens += req.tokens_cached.unwrap_or(0) as u64;
 }
 
 fn update_provider_stats(agg: &mut Aggregate, req: &RequestLog) {
@@ -218,11 +221,72 @@ fn save_auth_to_file(auth: &AuthStatus) -> Result<(), String> {
     std::fs::write(path, data).map_err(|e| e.to_string())
 }
 
+// Parse duration string to milliseconds
+fn parse_duration(duration_str: &str) -> u64 {
+    if duration_str.ends_with("ms") {
+        duration_str.trim_end_matches("ms").parse().unwrap_or(0)
+    } else if duration_str.ends_with('s') {
+        let secs: f64 = duration_str.trim_end_matches('s').parse().unwrap_or(0.0);
+        (secs * 1000.0) as u64
+    } else {
+        0
+    }
+}
+
+// Extract timestamp from log line
+// Format: 2025-12-24 15:14:21 or similar at the start of line
+fn extract_timestamp_from_line(line: &str) -> Option<u64> {
+    lazy_static::lazy_static! {
+        static ref TS_REGEX: Regex = Regex::new(
+            r#"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})"#
+        ).unwrap();
+    }
+    
+    if let Some(caps) = TS_REGEX.captures(line) {
+        let date_str = caps.get(1)?.as_str();
+        let time_str = caps.get(2)?.as_str();
+        let datetime_str = format!("{} {}", date_str, time_str);
+        return chrono::NaiveDateTime::parse_from_str(&datetime_str, "%Y-%m-%d %H:%M:%S")
+            .ok()
+            .map(|dt| dt.and_local_timezone(chrono::Local).unwrap().timestamp_millis() as u64);
+    }
+    None
+}
+
 // Parse a GIN log line and extract request information
 // Format: [GIN] 2025/12/04 - 20:51:48 | 200 | 6.656s | ::1 | POST "/api/provider/anthropic/v1/messages"
-fn parse_gin_log_line(line: &str, request_counter: &AtomicU64) -> Option<RequestLog> {
-    // Only process GIN request logs
-    if !line.contains("[GIN]") {
+// Also handles new format: | request_id | 200 | 6.656s | ip | POST "/path"
+fn parse_gin_log_line(line: &str, request_counter: &AtomicU64, model_cache: &std::sync::RwLock<std::collections::HashMap<String, String>>) -> Option<RequestLog> {
+    // Check for model info in DEBUG lines and cache it
+    // Format: | f803bb77 | Use OAuth user@email.com for model gemini-claude-opus-4-5-thinking
+    if line.contains("for model ") {
+        lazy_static::lazy_static! {
+            static ref MODEL_REGEX: Regex = Regex::new(
+                r#"\|\s+([a-f0-9]{8})\s+\|.*for model\s+(\S+)"#
+            ).unwrap();
+        }
+        if let Some(caps) = MODEL_REGEX.captures(line) {
+            let request_id = caps.get(1)?.as_str().to_string();
+            let model = caps.get(2)?.as_str().to_string();
+            if let Ok(mut cache) = model_cache.write() {
+                cache.insert(request_id, model);
+                // Keep cache size reasonable
+                if cache.len() > 1000 {
+                    let keys: Vec<String> = cache.keys().take(500).cloned().collect();
+                    for key in keys {
+                        cache.remove(&key);
+                    }
+                }
+            }
+        }
+        return None;
+    }
+    
+    // Only process GIN request logs or new format logs with request ID
+    let is_gin_log = line.contains("[GIN]");
+    let is_new_format = !is_gin_log && line.contains("| POST") || line.contains("| GET");
+    
+    if !is_gin_log && !is_new_format {
         return None;
     }
     
@@ -250,14 +314,73 @@ fn parse_gin_log_line(line: &str, request_counter: &AtomicU64) -> Option<Request
         return None;
     }
     
-    // Parse the GIN log format using regex
-    // Example: [GIN] 2025/12/04 - 20:51:48 | 200 | 6.656s | ::1 | POST "/api/provider/anthropic/v1/messages" | model=claude-3-opus
+    // Try new format first: | request_id | status | duration | ip | METHOD "path"
+    // Example: | f803bb77 | 200 | 12.453s | 127.0.0.1 | POST "/v1/messages"
     lazy_static::lazy_static! {
+        static ref NEW_FORMAT_REGEX: Regex = Regex::new(
+            r#"\|\s+([a-f0-9]{8}|-{8})\s+\|\s+(\d+)\s+\|\s+([^\s]+)\s+\|\s+[^\s]+\s+\|\s+(\w+)\s+"([^"]+)""#
+        ).unwrap();
         static ref GIN_REGEX: Regex = Regex::new(
             r#"\[GIN\]\s+(\d{4}/\d{2}/\d{2})\s+-\s+(\d{2}:\d{2}:\d{2})\s+\|\s+(\d+)\s+\|\s+([^\s]+)\s+\|\s+[^\s]+\s+\|\s+(\w+)\s+"([^"]+)"(?:\s+\|\s+model=(\S+))?"#
         ).unwrap();
     }
     
+    // Try new format
+    if let Some(captures) = NEW_FORMAT_REGEX.captures(line) {
+        let request_id = captures.get(1)?.as_str().to_string();
+        let status: u16 = captures.get(2)?.as_str().parse().ok()?;
+        let duration_str = captures.get(3)?.as_str();
+        let method = captures.get(4)?.as_str().to_string();
+        let path = captures.get(5)?.as_str().to_string();
+        
+        // Get timestamp from the beginning of the line if present
+        let timestamp = extract_timestamp_from_line(line)
+            .unwrap_or_else(|| std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64);
+        
+        // Parse duration to milliseconds
+        let duration_ms = parse_duration(duration_str);
+        
+        // Look up model from cache using request_id, or fall back to path extraction
+        let model = if request_id != "--------" {
+            model_cache.read().ok()
+                .and_then(|cache| cache.get(&request_id).cloned())
+                .or_else(|| extract_model_from_path(&path))
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            extract_model_from_path(&path).unwrap_or_else(|| "unknown".to_string())
+        };
+        
+        // Determine provider from model first (more accurate), fallback to path-based detection
+        let model_provider = detect_provider_from_model(&model);
+        let provider = if model_provider != "unknown" {
+            model_provider
+        } else {
+            detect_provider_from_path(&path).unwrap_or_else(|| "unknown".to_string())
+        };
+        
+        // Generate unique ID
+        let count = request_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = format!("req_{}_{}", timestamp, count);
+        
+        return Some(RequestLog {
+            id,
+            timestamp,
+            provider,
+            model,
+            method,
+            path,
+            status,
+            duration_ms,
+            tokens_in: None,
+            tokens_out: None,
+            tokens_cached: None,
+        });
+    }
+    
+    // Fall back to GIN format
     let captures = GIN_REGEX.captures(line)?;
     
     let date_str = captures.get(1)?.as_str(); // 2025/12/04
@@ -278,14 +401,7 @@ fn parse_gin_log_line(line: &str, request_counter: &AtomicU64) -> Option<Request
             .as_millis() as u64);
     
     // Parse duration to milliseconds
-    let duration_ms: u64 = if duration_str.ends_with("ms") {
-        duration_str.trim_end_matches("ms").parse().unwrap_or(0)
-    } else if duration_str.ends_with('s') {
-        let secs: f64 = duration_str.trim_end_matches('s').parse().unwrap_or(0.0);
-        (secs * 1000.0) as u64
-    } else {
-        0
-    };
+    let duration_ms = parse_duration(duration_str);
     
     // Extract model from log line (group 7) or fall back to path extraction for Gemini
     let model = captures.get(7)
@@ -293,9 +409,13 @@ fn parse_gin_log_line(line: &str, request_counter: &AtomicU64) -> Option<Request
         .or_else(|| extract_model_from_path(&path))
         .unwrap_or_else(|| "unknown".to_string());
     
-    // Determine provider from path first, then fallback to model-based detection
-    let provider = detect_provider_from_path(&path)
-        .unwrap_or_else(|| detect_provider_from_model(&model));
+    // Determine provider from model first (more accurate), fallback to path-based detection
+    let model_provider = detect_provider_from_model(&model);
+    let provider = if model_provider != "unknown" {
+        model_provider
+    } else {
+        detect_provider_from_path(&path).unwrap_or_else(|| "unknown".to_string())
+    };
     
     let id = request_counter.fetch_add(1, Ordering::SeqCst);
     // Use timestamp + counter for unique ID (survives app restarts)
@@ -312,6 +432,7 @@ fn parse_gin_log_line(line: &str, request_counter: &AtomicU64) -> Option<Request
         duration_ms,
         tokens_in: None,  // Not available from GIN logs
         tokens_out: None, // Not available from GIN logs
+        tokens_cached: None, // Not available from GIN logs
     })
 }
 
@@ -323,6 +444,10 @@ fn start_log_watcher(
     request_counter: Arc<AtomicU64>,
 ) {
     std::thread::spawn(move || {
+        // Model cache to associate request IDs with model names from DEBUG lines
+        let model_cache: std::sync::RwLock<std::collections::HashMap<String, String>> = 
+            std::sync::RwLock::new(std::collections::HashMap::new());
+        
         // Wait for log file to exist
         let mut attempts = 0;
         while !log_path.exists() && attempts < 30 {
@@ -380,7 +505,7 @@ fn start_log_watcher(
             // Read new lines
             let mut line = String::new();
             while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                if let Some(request_log) = parse_gin_log_line(&line, &request_counter) {
+                if let Some(request_log) = parse_gin_log_line(&line, &request_counter, &model_cache) {
                     // Emit to frontend for live display
                     let _ = app_handle.emit("request-log", request_log.clone());
                     
@@ -405,6 +530,7 @@ fn start_log_watcher(
                         }
                         agg.total_tokens_in += request_log.tokens_in.unwrap_or(0) as u64;
                         agg.total_tokens_out += request_log.tokens_out.unwrap_or(0) as u64;
+                        agg.total_tokens_cached += request_log.tokens_cached.unwrap_or(0) as u64;
                         
                         // Update time-series (today's date)
                         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -1902,25 +2028,151 @@ fn get_auth_status(state: State<AppState>) -> AuthStatus {
     state.auth_status.lock().unwrap().clone()
 }
 
-// Compute usage statistics from local request history (persisted data)
-// This ensures Analytics shows the same data as Dashboard's Request History
+// Live usage data from Go backend
+struct LiveUsageData {
+    total_tokens: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: u64,
+    model_tokens: std::collections::HashMap<String, u64>,
+    model_token_breakdown: std::collections::HashMap<String, (u64, u64, u64)>, // (input, output, cached)
+    tokens_by_hour: Vec<TimeSeriesPoint>,
+}
+
+// Fetch live usage stats from Go backend (blocking version for sync context)
+fn fetch_live_usage_stats_blocking(port: u16) -> Option<LiveUsageData> {
+    let url = format!("http://127.0.0.1:{}/v0/management/usage", port);
+    let client = reqwest::blocking::Client::new();
+    
+    let response = client.get(&url)
+        .header("X-Management-Key", "proxypal-mgmt-key")
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .ok()?;
+    
+    let json: serde_json::Value = response.json().ok()?;
+    
+    // Parse the response structure:
+    // { "usage": { "total_tokens": N, "apis": { "api-name": { "models": { "model": { "total_tokens": N, "details": [...] } } } } } }
+    let usage = json.get("usage")?;
+    
+    let total_tokens = usage.get("total_tokens")?.as_u64().unwrap_or(0);
+    
+    // Extract input/output/cached tokens from the detailed data
+    let mut input_tokens = 0u64;
+    let mut output_tokens = 0u64;
+    let mut cached_tokens = 0u64;
+    let mut model_tokens: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut model_token_breakdown: std::collections::HashMap<String, (u64, u64, u64)> = std::collections::HashMap::new();
+    
+    if let Some(apis) = usage.get("apis").and_then(|v| v.as_object()) {
+        for (_api_name, api_data) in apis {
+            if let Some(models) = api_data.get("models").and_then(|v| v.as_object()) {
+                for (model_name, model_data) in models {
+                    let model_total = model_data.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    *model_tokens.entry(model_name.clone()).or_insert(0) += model_total;
+                    
+                    // Sum up input/output/cached from details per model
+                    let mut model_input = 0u64;
+                    let mut model_output = 0u64;
+                    let mut model_cached = 0u64;
+                    
+                    if let Some(details) = model_data.get("details").and_then(|v| v.as_array()) {
+                        for detail in details {
+                            if let Some(tokens) = detail.get("tokens") {
+                                let inp = tokens.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let out = tokens.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let cached = tokens.get("cached_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                
+                                input_tokens += inp;
+                                output_tokens += out;
+                                cached_tokens += cached;
+                                
+                                model_input += inp;
+                                model_output += out;
+                                model_cached += cached;
+                            }
+                        }
+                    }
+                    
+                    // Store per-model breakdown
+                    let entry = model_token_breakdown.entry(model_name.clone()).or_insert((0, 0, 0));
+                    entry.0 += model_input;
+                    entry.1 += model_output;
+                    entry.2 += model_cached;
+                }
+            }
+        }
+    }
+    
+    Some(LiveUsageData {
+        total_tokens,
+        input_tokens,
+        output_tokens,
+        cached_tokens,
+        model_tokens,
+        model_token_breakdown,
+        tokens_by_hour: {
+            // Parse tokens_by_hour from Go backend: { "HH": value, ... }
+            let mut result = Vec::new();
+            if let Some(tbh) = usage.get("tokens_by_hour").and_then(|v| v.as_object()) {
+                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                for (hour, value) in tbh {
+                    if let Some(v) = value.as_u64() {
+                        // Convert "HH" format to "YYYY-MM-DDTHH" format
+                        let label = format!("{}T{}", today, hour);
+                        result.push(TimeSeriesPoint { label, value: v });
+                    }
+                }
+                result.sort_by(|a, b| a.label.cmp(&b.label));
+            }
+            result
+        },
+    })
+}
+
+// Compute usage statistics - fetches live data from Go backend when proxy is running
 #[tauri::command]
-fn get_usage_stats() -> UsageStats {
+fn get_usage_stats(state: State<'_, AppState>) -> Result<UsageStats, String> {
     let agg = load_aggregate();
     let history = load_request_history();
     
+    // Get proxy status
+    let (is_running, port) = {
+        let status = state.proxy_status.lock().unwrap();
+        (status.running, status.port)
+    };
+    
+    // Try to fetch live data from Go backend if proxy is running
+    let live_data = if is_running {
+        fetch_live_usage_stats_blocking(port)
+    } else {
+        None
+    };
+    
+    // Merge live data with aggregate
+    let (total_tokens, input_tokens, output_tokens, cached_tokens, model_tokens, model_token_breakdown): (u64, u64, u64, u64, std::collections::HashMap<String, u64>, std::collections::HashMap<String, (u64, u64, u64)>) = if let Some(ref live) = live_data {
+        (live.total_tokens, live.input_tokens, live.output_tokens, live.cached_tokens, live.model_tokens.clone(), live.model_token_breakdown.clone())
+    } else {
+        // Build model token breakdown from aggregate stats
+        let agg_model_tokens: std::collections::HashMap<String, u64> = agg.model_stats.iter()
+            .map(|(k, v)| (k.clone(), v.tokens))
+            .collect();
+        let agg_model_breakdown: std::collections::HashMap<String, (u64, u64, u64)> = agg.model_stats.iter()
+            .map(|(k, v)| (k.clone(), (v.input_tokens, v.output_tokens, v.cached_tokens)))
+            .collect();
+        (agg.total_tokens_in + agg.total_tokens_out, agg.total_tokens_in, agg.total_tokens_out, agg.total_tokens_cached, agg_model_tokens, agg_model_breakdown)
+    };
+    
     // If no data yet, return defaults
     if agg.total_requests == 0 && history.requests.is_empty() {
-        return UsageStats::default();
+        return Ok(UsageStats::default());
     }
     
     // Use aggregate as primary source of truth for all-time stats
     let total_requests = agg.total_requests;
     let success_count = agg.total_success_count;
     let failure_count = agg.total_failure_count;
-    let input_tokens = agg.total_tokens_in;
-    let output_tokens = agg.total_tokens_out;
-    let total_tokens = input_tokens + output_tokens;
     
     // Calculate today's stats from aggregate time-series
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -1928,20 +2180,48 @@ fn get_usage_stats() -> UsageStats {
         .find(|p| p.label == today)
         .map(|p| p.value)
         .unwrap_or(0);
-    let tokens_today = agg.tokens_by_day.iter()
-        .find(|p| p.label == today)
-        .map(|p| p.value)
-        .unwrap_or(0);
     
-    // Build model stats from aggregate
+    // Get today's tokens from live data or aggregate
+    let tokens_today = if let Some(ref live) = live_data {
+        live.total_tokens // Use live total as "today" since it's current session
+    } else {
+        agg.tokens_by_day.iter()
+            .find(|p| p.label == today)
+            .map(|p| p.value)
+            .unwrap_or(0)
+    };
+    
+    // Build model stats - merge aggregate with live token data
     let mut models: Vec<ModelUsage> = agg.model_stats.iter()
         .filter(|(model, _)| *model != "unknown" && !model.is_empty())
-        .map(|(model, stats)| ModelUsage {
-            model: model.clone(),
-            requests: stats.requests,
-            tokens: stats.tokens,
+        .map(|(model, stats)| {
+            let tokens = model_tokens.get(model).copied().unwrap_or(stats.tokens);
+            let (input, output, cached) = model_token_breakdown.get(model).copied().unwrap_or((0, 0, 0));
+            ModelUsage {
+                model: model.clone(),
+                requests: stats.requests,
+                tokens,
+                input_tokens: input,
+                output_tokens: output,
+                cached_tokens: cached,
+            }
         })
         .collect();
+    
+    // Add any models from live data that aren't in aggregate
+    for (model, tokens) in &model_tokens {
+        if !models.iter().any(|m| &m.model == model) && model != "unknown" && !model.is_empty() {
+            let (input, output, cached) = model_token_breakdown.get(model).copied().unwrap_or((0, 0, 0));
+            models.push(ModelUsage {
+                model: model.clone(),
+                requests: 0, // Will be updated from aggregate
+                tokens: *tokens,
+                input_tokens: input,
+                output_tokens: output,
+                cached_tokens: cached,
+            });
+        }
+    }
     models.sort_by(|a, b| b.requests.cmp(&a.requests));
     
     // Build provider stats from aggregate
@@ -2007,21 +2287,33 @@ fn get_usage_stats() -> UsageStats {
         requests_by_hour = requests_by_hour.split_off(requests_by_hour.len() - 24);
     }
     
-    let mut tokens_by_hour: Vec<TimeSeriesPoint> = tokens_by_hour_map.into_iter()
-        .map(|(label, value)| TimeSeriesPoint { label, value })
-        .collect();
+    // Use live tokens_by_hour if available (more accurate), otherwise use computed from history
+    let mut tokens_by_hour: Vec<TimeSeriesPoint> = if let Some(ref live) = live_data {
+        if !live.tokens_by_hour.is_empty() {
+            live.tokens_by_hour.clone()
+        } else {
+            tokens_by_hour_map.into_iter()
+                .map(|(label, value)| TimeSeriesPoint { label, value })
+                .collect()
+        }
+    } else {
+        tokens_by_hour_map.into_iter()
+            .map(|(label, value)| TimeSeriesPoint { label, value })
+            .collect()
+    };
     tokens_by_hour.sort_by(|a, b| a.label.cmp(&b.label));
     if tokens_by_hour.len() > 24 {
         tokens_by_hour = tokens_by_hour.split_off(tokens_by_hour.len() - 24);
     }
     
-    UsageStats {
+    Ok(UsageStats {
         total_requests,
         success_count,
         failure_count,
         total_tokens,
         input_tokens,
         output_tokens,
+        cached_tokens,
         requests_today,
         tokens_today,
         models,
@@ -2030,7 +2322,7 @@ fn get_usage_stats() -> UsageStats {
         tokens_by_day,
         requests_by_hour,
         tokens_by_hour,
-    }
+    })
 }
 
 // Get request history
@@ -2049,10 +2341,12 @@ fn add_request_to_history(request: RequestLog) -> Result<RequestLog, String> {
     let tokens_in = request.tokens_in.unwrap_or(0);
     let tokens_out = request.tokens_out.unwrap_or(0);
     let cost = estimate_request_cost(&request.model, tokens_in, tokens_out);
+    let tokens_cached = request.tokens_cached.unwrap_or(0);
     
     // Update totals
     history.total_tokens_in += tokens_in as u64;
     history.total_tokens_out += tokens_out as u64;
+    history.total_tokens_cached += tokens_cached as u64;
     history.total_cost_usd += cost;
     
     // Add request (with deduplication check)
@@ -2117,7 +2411,8 @@ async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHist
     // Calculate input/output token split from APIs data
     let mut total_input: u64 = 0;
     let mut total_output: u64 = 0;
-    let mut model_stats: std::collections::HashMap<String, (u64, u64, u64)> = std::collections::HashMap::new(); // (requests, input, output)
+    let mut total_cached: u64 = 0;
+    let mut model_stats: std::collections::HashMap<String, (u64, u64, u64, u64)> = std::collections::HashMap::new(); // (requests, input, output, cached)
     
     if let Some(apis) = usage.get("apis").and_then(|v| v.as_object()) {
         for (_api_path, api_data) in apis {
@@ -2128,13 +2423,16 @@ async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHist
                             if let Some(tokens) = detail.get("tokens") {
                                 let input = tokens.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                                 let output = tokens.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let cached = tokens.get("cached_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                                 total_input += input;
                                 total_output += output;
+                                total_cached += cached;
                                 
-                                let entry = model_stats.entry(model_name.clone()).or_insert((0, 0, 0));
+                                let entry = model_stats.entry(model_name.clone()).or_insert((0, 0, 0, 0));
                                 entry.0 += 1; // request count
                                 entry.1 += input;
                                 entry.2 += output;
+                                entry.3 += cached;
                             }
                         }
                     }
@@ -2145,7 +2443,7 @@ async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHist
     
     // Calculate cost based on real token data
     let mut total_cost: f64 = 0.0;
-    for (model_name, (_, input, output)) in &model_stats {
+    for (model_name, (_, input, output, _cached)) in &model_stats {
         total_cost += estimate_request_cost(model_name, *input as u32, *output as u32);
     }
     
@@ -2188,6 +2486,7 @@ async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHist
     let mut history = load_request_history();
     history.total_tokens_in = total_input;
     history.total_tokens_out = total_output;
+    history.total_tokens_cached = total_cached;
     history.total_cost_usd = total_cost;
     history.tokens_by_day = tokens_by_day.clone();
     history.tokens_by_hour = tokens_by_hour;
@@ -2473,6 +2772,287 @@ async fn disconnect_provider(
     let _ = app.emit("auth-status-changed", auth.clone());
 
     Ok(auth.clone())
+}
+
+// Helper function to refresh Antigravity OAuth token
+async fn refresh_antigravity_token(client: &reqwest::Client, refresh_token: &str) -> Result<String, String> {
+    let token_url = "https://oauth2.googleapis.com/token";
+    
+    // Antigravity OAuth credentials (from CLIProxyAPI)
+    let client_id = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+    let client_secret = "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";
+    
+    let params = [
+        ("client_id", client_id),
+        ("client_secret", client_secret),
+        ("refresh_token", refresh_token),
+        ("grant_type", "refresh_token"),
+    ];
+    
+    let response = client
+        .post(token_url)
+        .form(&params)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Token refresh failed ({}): {}", status, body));
+    }
+    
+    let token_response: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+    
+    token_response
+        .get("access_token")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "No access_token in refresh response".to_string())
+}
+
+// Fetch Antigravity quota for all authenticated accounts
+#[tauri::command]
+async fn fetch_antigravity_quota() -> Result<Vec<types::AntigravityQuotaResult>, String> {
+    use types::{AntigravityQuotaResult, ModelQuota, AntigravityModelsResponse};
+    
+    let auth_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".cli-proxy-api");
+    
+    if !auth_dir.exists() {
+        return Ok(vec![]);
+    }
+    
+    let mut results: Vec<AntigravityQuotaResult> = Vec::new();
+    let client = reqwest::Client::new();
+    
+    // Scan for Antigravity auth files
+    if let Ok(entries) = std::fs::read_dir(&auth_dir) {
+        for entry in entries.flatten() {
+            let filename = entry.file_name().to_string_lossy().to_lowercase();
+            let file_path = entry.path();
+            
+            if filename.starts_with("antigravity-") && filename.ends_with(".json") {
+                // Extract email from filename: antigravity-{email}.json
+                let email = filename
+                    .trim_start_matches("antigravity-")
+                    .trim_end_matches(".json")
+                    .to_string();
+                
+                // Read and parse auth file
+                let content = match std::fs::read_to_string(&file_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        results.push(AntigravityQuotaResult {
+                            account_email: email,
+                            quotas: vec![],
+                            fetched_at: chrono::Local::now().to_rfc3339(),
+                            error: Some(format!("Failed to read auth file: {}", e)),
+                        });
+                        continue;
+                    }
+                };
+                
+                let mut auth_json: serde_json::Value = match serde_json::from_str(&content) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        results.push(AntigravityQuotaResult {
+                            account_email: email,
+                            quotas: vec![],
+                            fetched_at: chrono::Local::now().to_rfc3339(),
+                            error: Some(format!("Invalid JSON: {}", e)),
+                        });
+                        continue;
+                    }
+                };
+                
+                // Check if token is expired and refresh if needed
+                let expired_str = auth_json.get("expired").and_then(|e| e.as_str());
+                let refresh_token = auth_json.get("refresh_token").and_then(|r| r.as_str()).map(|s| s.to_string());
+                
+                let mut access_token = auth_json
+                    .get("access_token")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+                
+                // Check if token is expired
+                let is_expired = if let Some(exp) = expired_str {
+                    chrono::DateTime::parse_from_rfc3339(exp)
+                        .map(|dt| dt < chrono::Local::now())
+                        .unwrap_or(true)
+                } else {
+                    true // Assume expired if no expiry field
+                };
+                
+                // Refresh token if expired
+                if is_expired {
+                    if let Some(ref rt) = refresh_token {
+                        match refresh_antigravity_token(&client, rt).await {
+                            Ok(new_token) => {
+                                // Update auth file with new token
+                                if let Some(obj) = auth_json.as_object_mut() {
+                                    obj.insert("access_token".to_string(), serde_json::Value::String(new_token.clone()));
+                                    // Update expiry (1 hour from now)
+                                    let new_expiry = (chrono::Local::now() + chrono::Duration::hours(1)).to_rfc3339();
+                                    obj.insert("expired".to_string(), serde_json::Value::String(new_expiry));
+                                    
+                                    // Save updated auth file
+                                    if let Ok(updated_content) = serde_json::to_string(&auth_json) {
+                                        let _ = std::fs::write(&file_path, updated_content);
+                                    }
+                                }
+                                access_token = Some(new_token);
+                            }
+                            Err(e) => {
+                                results.push(AntigravityQuotaResult {
+                                    account_email: email,
+                                    quotas: vec![],
+                                    fetched_at: chrono::Local::now().to_rfc3339(),
+                                    error: Some(format!("Token refresh failed: {}", e)),
+                                });
+                                continue;
+                            }
+                        }
+                    } else {
+                        results.push(AntigravityQuotaResult {
+                            account_email: email,
+                            quotas: vec![],
+                            fetched_at: chrono::Local::now().to_rfc3339(),
+                            error: Some("Token expired and no refresh_token available".to_string()),
+                        });
+                        continue;
+                    }
+                }
+                
+                let access_token = match access_token {
+                    Some(t) => t,
+                    None => {
+                        results.push(AntigravityQuotaResult {
+                            account_email: email,
+                            quotas: vec![],
+                            fetched_at: chrono::Local::now().to_rfc3339(),
+                            error: Some("No access_token found in auth file".to_string()),
+                        });
+                        continue;
+                    }
+                };
+                
+                // Fetch quota from Google API - try multiple endpoints with fallback
+                let base_urls = [
+                    "https://daily-cloudcode-pa.googleapis.com",
+                    "https://daily-cloudcode-pa.sandbox.googleapis.com",
+                    "https://cloudcode-pa.googleapis.com",
+                ];
+                
+                let mut last_error: Option<String> = None;
+                let mut quotas_result: Option<Vec<ModelQuota>> = None;
+                
+                'url_loop: for base_url in base_urls {
+                    let api_url = format!("{}/v1internal:fetchAvailableModels", base_url);
+                    let response = client
+                        .post(&api_url)
+                        .header("Authorization", format!("Bearer {}", access_token))
+                        .header("Content-Type", "application/json")
+                        .header("User-Agent", "antigravity/1.104.0 darwin/arm64")
+                        .body("{}")
+                        .timeout(std::time::Duration::from_secs(10))
+                        .send()
+                        .await;
+                
+                    match response {
+                        Ok(resp) => {
+                            if resp.status() == 403 {
+                                last_error = Some("Account forbidden (possibly banned or token expired)".to_string());
+                                break 'url_loop; // Don't retry on 403
+                            }
+                            
+                            if resp.status() == 404 {
+                                last_error = Some(format!("API error: {} (trying next endpoint)", resp.status()));
+                                continue 'url_loop; // Try next URL
+                            }
+                            
+                            if !resp.status().is_success() {
+                                last_error = Some(format!("API error: {}", resp.status()));
+                                continue 'url_loop; // Try next URL
+                            }
+                            
+                            let body: AntigravityModelsResponse = match resp.json().await {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    last_error = Some(format!("Failed to parse response: {}", e));
+                                    continue 'url_loop;
+                                }
+                            };
+                            
+                            // Parse models and extract quota info (HashMap format)
+                            let mut quotas: Vec<ModelQuota> = Vec::new();
+                            
+                            if let Some(models) = body.models {
+                                for (model_name, model_info) in models {
+                                    if let Some(quota_info) = model_info.quota_info {
+                                        if let Some(remaining) = quota_info.remaining_fraction {
+                                            // Map model names to display names
+                                            let display_name = match model_name.as_str() {
+                                                "gemini-2.5-pro" => "Gemini 2.5 Pro",
+                                                "gemini-2.5-flash" => "Gemini 2.5 Flash",
+                                                "gemini-2.0-flash" => "Gemini 2.0 Flash",
+                                                "gemini-2.0-flash-lite" => "Gemini 2.0 Flash Lite",
+                                                "gemini-exp-1206" => "Gemini Exp",
+                                                "gemini-claude-sonnet-4-5" | "gemini-claude-sonnet-4-5-thinking" => "Claude Sonnet 4.5",
+                                                "gemini-claude-opus-4-5" | "gemini-claude-opus-4-5-thinking" => "Claude Opus 4.5",
+                                                "imagen-3.0-generate-002" => "Imagen 3",
+                                                _ => &model_name,
+                                            }.to_string();
+                                            
+                                            quotas.push(ModelQuota {
+                                                model: model_name,
+                                                display_name,
+                                                remaining_percent: remaining * 100.0,
+                                                reset_time: quota_info.reset_time,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Sort by model name for consistent display
+                            quotas.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+                            quotas_result = Some(quotas);
+                            break 'url_loop; // Success, stop trying
+                        }
+                        Err(e) => {
+                            last_error = Some(format!("Network error: {}", e));
+                            continue 'url_loop; // Try next URL
+                        }
+                    }
+                }
+                
+                // Push result based on whether we succeeded
+                if let Some(quotas) = quotas_result {
+                    results.push(AntigravityQuotaResult {
+                        account_email: email,
+                        quotas,
+                        fetched_at: chrono::Local::now().to_rfc3339(),
+                        error: None,
+                    });
+                } else {
+                    results.push(AntigravityQuotaResult {
+                        account_email: email,
+                        quotas: vec![],
+                        fetched_at: chrono::Local::now().to_rfc3339(),
+                        error: last_error.or(Some("All API endpoints failed".to_string())),
+                    });
+                }
+            }
+        }
+    }
+    
+    Ok(results)
 }
 
 // Import Vertex service account credential (JSON file)
@@ -5321,6 +5901,7 @@ pub fn run() {
             poll_oauth_status,
             complete_oauth,
             disconnect_provider,
+            fetch_antigravity_quota,
             import_vertex_credential,
             commands::config::get_config,
             commands::config::save_config,

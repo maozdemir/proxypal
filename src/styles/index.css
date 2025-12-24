@@ -18,7 +18,8 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color: #0f0f0f;
+  /* Slate-based light mode */
+  color: #0f172a; /* slate-900 */
   background-color: #ffffff;
 
   font-synthesis: none;
@@ -28,10 +29,10 @@
   -webkit-text-size-adjust: 100%;
 }
 
-/* Class-based dark mode */
+/* Slate-based dark mode */
 .dark {
-  color: #f6f6f6;
-  background-color: #0f0f0f;
+  color: #f1f5f9; /* slate-100 */
+  background-color: #0f172a; /* slate-900 */
 }
 
 * {
@@ -57,20 +58,20 @@ body,
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #cbd5e1; /* slate-300 */
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #94a3b8; /* slate-400 */
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #4b5563;
+  background: #475569; /* slate-600 */
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+  background: #64748b; /* slate-500 */
 }
 
 /* Toast animations */
@@ -270,7 +271,7 @@ body,
     text-shadow: none;
   }
   50% {
-    text-shadow: 0 0 8px rgba(99, 102, 241, 0.3);
+    text-shadow: 0 0 8px rgba(59, 130, 246, 0.3); /* blue-500 */
   }
 }
 

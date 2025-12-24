@@ -534,6 +534,9 @@ export interface ModelUsage {
 	model: string;
 	requests: number;
 	tokens: number;
+	inputTokens: number;
+	outputTokens: number;
+	cachedTokens: number;
 }
 
 export interface ProviderUsage {
@@ -549,6 +552,7 @@ export interface UsageStats {
 	totalTokens: number;
 	inputTokens: number;
 	outputTokens: number;
+	cachedTokens: number;
 	requestsToday: number;
 	tokensToday: number;
 	models: ModelUsage[];
@@ -569,6 +573,7 @@ export interface RequestHistory {
 	requests: RequestLog[];
 	totalTokensIn: number;
 	totalTokensOut: number;
+	totalTokensCached: number;
 	totalCostUsd: number;
 }
 
@@ -1109,4 +1114,28 @@ export interface UpdaterSupport {
 
 export async function isUpdaterSupported(): Promise<UpdaterSupport> {
 	return invoke<UpdaterSupport>("is_updater_supported");
+}
+
+// ============================================================================
+// Antigravity Quota
+// ============================================================================
+
+export interface ModelQuota {
+	model: string;
+	displayName: string;
+	remainingPercent: number;
+	resetTime?: string;
+}
+
+export interface AntigravityQuotaResult {
+	accountEmail: string;
+	quotas: ModelQuota[];
+	fetchedAt: string;
+	error?: string;
+}
+
+export async function fetchAntigravityQuota(): Promise<
+	AntigravityQuotaResult[]
+> {
+	return invoke("fetch_antigravity_quota");
 }

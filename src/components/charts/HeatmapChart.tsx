@@ -61,8 +61,8 @@ export function HeatmapChart(props: HeatmapChartProps) {
 				show: false,
 				inRange: {
 					color: isDark
-						? ["#1e293b", "#3b82f6", "#8b5cf6"]
-						: ["#eff6ff", "#3b82f6", "#7c3aed"],
+						? ["#1e293b", "#3b82f6", "#2563eb"] // slate-800 → blue
+						: ["#f1f5f9", "#60a5fa", "#2563eb"], // slate-100 → blue
 				},
 			},
 			series: [

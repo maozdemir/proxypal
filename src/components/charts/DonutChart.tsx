@@ -17,15 +17,17 @@ interface DonutChartProps {
 	class?: string;
 }
 
+// High-contrast palette for dark mode visibility
+// Primary blue + complementary colors with good distinction
 const COLORS = [
-	"#3b82f6", // blue
-	"#8b5cf6", // purple
-	"#06b6d4", // cyan
-	"#10b981", // green
-	"#f59e0b", // amber
-	"#ef4444", // red
-	"#ec4899", // pink
-	"#6366f1", // indigo
+	"#3b82f6", // blue-500 (primary)
+	"#38bdf8", // sky-400 (contrast)
+	"#a78bfa", // violet-400
+	"#fb923c", // orange-400
+	"#f472b6", // pink-400
+	"#22d3ee", // cyan-400
+	"#facc15", // yellow-400
+	"#94a3b8", // slate-400
 ];
 
 export function DonutChart(props: DonutChartProps) {

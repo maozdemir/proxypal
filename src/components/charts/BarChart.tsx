@@ -84,8 +84,8 @@ export function BarChart(props: BarChartProps) {
 							x2: isHorizontal ? 1 : 0,
 							y2: 0,
 							colorStops: [
-								{ offset: 0, color: "#3b82f6" },
-								{ offset: 1, color: "#8b5cf6" },
+								{ offset: 0, color: "#3b82f6" }, // blue-500
+								{ offset: 1, color: "#2563eb" }, // blue-600
 							],
 						},
 					},
@@ -98,8 +98,8 @@ export function BarChart(props: BarChartProps) {
 								x2: isHorizontal ? 1 : 0,
 								y2: 0,
 								colorStops: [
-									{ offset: 0, color: "#60a5fa" },
-									{ offset: 1, color: "#a78bfa" },
+									{ offset: 0, color: "#60a5fa" }, // blue-400
+									{ offset: 1, color: "#3b82f6" }, // blue-500
 								],
 							},
 						},
