@@ -1,6 +1,6 @@
 [package]
 name = "proxypal"
-version = "0.3.12"
+version = "0.3.13"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -38,4 +38,5 @@ chrono = "0.4"
 regex = "1"
 lazy_static = "1"
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-fs = "2.4.4"
 

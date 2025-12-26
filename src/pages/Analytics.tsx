@@ -1,3 +1,5 @@
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { Chart, registerables } from "chart.js";
 import {
 	createEffect,
@@ -15,7 +17,12 @@ import {
 	HeatmapChart,
 	type HeatmapData,
 } from "../components/charts";
-import { getUsageStats, type UsageStats } from "../lib/tauri";
+import {
+	exportUsageStats,
+	getUsageStats,
+	importUsageStats,
+	type UsageStats,
+} from "../lib/tauri";
 
 // Register Chart.js components
 Chart.register(...registerables);
@@ -315,6 +322,8 @@ export function Analytics() {
 	const [refreshing, setRefreshing] = createSignal(false);
 	const [lastUpdated, setLastUpdated] = createSignal<number>(Date.now());
 	const [privacyMode, setPrivacyMode] = createSignal(false);
+	const [exporting, setExporting] = createSignal(false);
+	const [importing, setImporting] = createSignal(false);
 
 	const fetchStats = async () => {
 		try {
@@ -337,6 +346,51 @@ export function Analytics() {
 			setTimeRange("hour");
 		} else {
 			setTimeRange("day");
+		}
+	};
+
+	// Export usage statistics to JSON file
+	const handleExport = async () => {
+		try {
+			setExporting(true);
+			const data = await exportUsageStats();
+
+			const filePath = await save({
+				defaultPath: `proxypal-usage-${new Date().toISOString().split("T")[0]}.json`,
+				filters: [{ name: "JSON", extensions: ["json"] }],
+			});
+
+			if (filePath) {
+				await writeTextFile(filePath, JSON.stringify(data, null, 2));
+			}
+		} catch (err) {
+			console.error("Failed to export usage stats:", err);
+		} finally {
+			setExporting(false);
+		}
+	};
+
+	// Import usage statistics from JSON file
+	const handleImport = async () => {
+		try {
+			setImporting(true);
+			const filePath = await open({
+				filters: [{ name: "JSON", extensions: ["json"] }],
+				multiple: false,
+			});
+
+			if (filePath) {
+				const content = await readTextFile(filePath as string);
+				const data = JSON.parse(content);
+				const result = await importUsageStats(data);
+				console.log("Import result:", result);
+				// Refresh stats after import
+				await fetchStats();
+			}
+		} catch (err) {
+			console.error("Failed to import usage stats:", err);
+		} finally {
+			setImporting(false);
 		}
 	};
 
@@ -638,6 +692,52 @@ export function Analytics() {
 								/>
 							</svg>
 							<span class="hidden sm:inline">Refresh</span>
+						</button>
+
+						{/* Export Button */}
+						<button
+							onClick={handleExport}
+							disabled={exporting() || !stats() || stats()!.totalRequests === 0}
+							class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+							title="Export usage statistics"
+						>
+							<svg
+								class={`w-4 h-4 ${exporting() ? "animate-pulse" : ""}`}
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+								/>
+							</svg>
+							<span class="hidden sm:inline">Export</span>
+						</button>
+
+						{/* Import Button */}
+						<button
+							onClick={handleImport}
+							disabled={importing()}
+							class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+							title="Import usage statistics"
+						>
+							<svg
+								class={`w-4 h-4 ${importing() ? "animate-pulse" : ""}`}
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+								/>
+							</svg>
+							<span class="hidden sm:inline">Import</span>
 						</button>
 					</div>
 				</div>

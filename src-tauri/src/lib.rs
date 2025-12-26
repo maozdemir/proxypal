@@ -2519,6 +2519,68 @@ async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHist
     Ok(history)
 }
 
+// Export usage statistics from CLIProxyAPI for backup
+#[tauri::command]
+async fn export_usage_stats(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let port = {
+        let config = state.config.lock().unwrap();
+        config.port
+    };
+    
+    let client = reqwest::Client::new();
+    let export_url = format!("http://127.0.0.1:{}/v0/management/usage/export", port);
+    
+    let response = client
+        .get(&export_url)
+        .header("X-Management-Key", &get_management_key())
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to export usage: {}. Is the proxy running?", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Export API returned status: {}", response.status()));
+    }
+    
+    let body: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse export response: {}", e))?;
+    
+    Ok(body)
+}
+
+// Import usage statistics into CLIProxyAPI from backup
+#[tauri::command]
+async fn import_usage_stats(state: State<'_, AppState>, data: serde_json::Value) -> Result<serde_json::Value, String> {
+    let port = {
+        let config = state.config.lock().unwrap();
+        config.port
+    };
+    
+    let client = reqwest::Client::new();
+    let import_url = format!("http://127.0.0.1:{}/v0/management/usage/import", port);
+    
+    let response = client
+        .post(&import_url)
+        .header("X-Management-Key", &get_management_key())
+        .header("Content-Type", "application/json")
+        .json(&data)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to import usage: {}. Is the proxy running?", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Import API returned status: {} - {}", status, body));
+    }
+    
+    let body: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse import response: {}", e))?;
+    
+    Ok(body)
+}
+
 #[tauri::command]
 async fn open_oauth(app: tauri::AppHandle, state: State<'_, AppState>, provider: String) -> Result<String, String> {
     // Get proxy port from config
@@ -5850,6 +5912,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -5927,6 +5990,8 @@ pub fn run() {
             add_request_to_history,
             clear_request_history,
             sync_usage_from_proxy,
+            export_usage_stats,
+            import_usage_stats,
             get_available_models,
             test_openai_provider,
             // API Keys Management

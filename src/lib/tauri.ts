@@ -599,6 +599,25 @@ export async function syncUsageFromProxy(): Promise<RequestHistory> {
 	return invoke("sync_usage_from_proxy");
 }
 
+// Export usage statistics for backup
+export async function exportUsageStats(): Promise<unknown> {
+	return invoke("export_usage_stats");
+}
+
+// Import usage statistics from backup
+export interface ImportUsageResult {
+	added: number;
+	skipped: number;
+	total_requests: number;
+	failed_requests: number;
+}
+
+export async function importUsageStats(
+	data: unknown,
+): Promise<ImportUsageResult> {
+	return invoke("import_usage_stats", { data });
+}
+
 // Test agent connection
 export interface AgentTestResult {
 	success: boolean;
