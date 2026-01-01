@@ -44,6 +44,12 @@ pub struct ClaudeCodeSettings {
     pub haiku_model: Option<String>,
     pub opus_model: Option<String>,
     pub sonnet_model: Option<String>,
+    #[serde(default)]
+    pub haiku_fallback: Vec<String>,
+    #[serde(default)]
+    pub sonnet_fallback: Vec<String>,
+    #[serde(default)]
+    pub opus_fallback: Vec<String>,
     pub base_url: Option<String>,
     pub auth_token: Option<String>,
 }

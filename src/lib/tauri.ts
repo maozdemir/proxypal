@@ -1078,6 +1078,9 @@ export interface ClaudeCodeSettings {
 	haikuModel: string | null;
 	opusModel: string | null;
 	sonnetModel: string | null;
+	haikuFallback: string[];
+	sonnetFallback: string[];
+	opusFallback: string[];
 	baseUrl: string | null;
 	authToken: string | null;
 }
@@ -1091,6 +1094,13 @@ export async function setClaudeCodeModel(
 	modelName: string,
 ): Promise<void> {
 	return invoke("set_claude_code_model", { modelType, modelName });
+}
+
+export async function setClaudeCodeFallbacks(
+	modelType: string,
+	models: string[],
+): Promise<void> {
+	return invoke("set_claude_code_fallbacks", { modelType, models });
 }
 
 // Raw Config YAML - for power users

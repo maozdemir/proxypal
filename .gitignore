@@ -37,3 +37,4 @@ src-tauri/target/
 src-tauri/logs/
 *.key
 *.pub
+docs/*

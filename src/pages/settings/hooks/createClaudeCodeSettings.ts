@@ -1,6 +1,10 @@
 import { createEffect, createSignal } from "solid-js";
 
-import { getClaudeCodeSettings, setClaudeCodeModel } from "../../../lib/tauri";
+import {
+	getClaudeCodeSettings,
+	setClaudeCodeFallbacks,
+	setClaudeCodeModel,
+} from "../../../lib/tauri";
 import type { ClaudeCodeSettings } from "../../../lib/tauri";
 import { toastStore } from "../../../stores/toast";
 
@@ -10,6 +14,9 @@ export function createClaudeCodeSettings() {
 			haikuModel: null,
 			opusModel: null,
 			sonnetModel: null,
+			haikuFallback: [],
+			sonnetFallback: [],
+			opusFallback: [],
 			baseUrl: null,
 			authToken: null,
 		});
@@ -44,6 +51,27 @@ export function createClaudeCodeSettings() {
 		}
 	};
 
-	return { claudeCodeSettings, handleClaudeCodeSettingChange };
+	const handleClaudeCodeFallbackChange = async (
+		slot: "haiku" | "opus" | "sonnet",
+		models: string[],
+	) => {
+		try {
+			await setClaudeCodeFallbacks(slot, models);
+			setClaudeCodeSettings((prev) => ({
+				...prev,
+				[`${slot}Fallback`]: models,
+			}));
+			toastStore.success("Claude Code fallbacks updated");
+		} catch (error) {
+			console.error("Failed to save Claude Code fallbacks:", error);
+			toastStore.error(`Failed to save fallbacks: ${error}`);
+		}
+	};
+
+	return {
+		claudeCodeSettings,
+		handleClaudeCodeSettingChange,
+		handleClaudeCodeFallbackChange,
+	};
 }
 

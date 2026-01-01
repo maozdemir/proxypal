@@ -231,8 +231,11 @@ export function SettingsPage() {
 	const { closeToTray, savingCloseToTray, handleCloseToTrayChange } =
 		createCloseToTraySetting();
 
-	const { claudeCodeSettings, handleClaudeCodeSettingChange } =
-		createClaudeCodeSettings();
+	const {
+		claudeCodeSettings,
+		handleClaudeCodeSettingChange,
+		handleClaudeCodeFallbackChange,
+	} = createClaudeCodeSettings();
 
 	// Raw YAML Config Editor state
 	const [yamlConfigExpanded, setYamlConfigExpanded] = createSignal(false);
@@ -985,6 +988,7 @@ export function SettingsPage() {
 							claudeCodeSettings={claudeCodeSettings}
 							getAvailableTargetModels={getAvailableTargetModels}
 							handleClaudeCodeSettingChange={handleClaudeCodeSettingChange}
+							handleClaudeCodeFallbackChange={handleClaudeCodeFallbackChange}
 						/>
 						<AmpCliIntegrationSection
 							activeTab={activeTab}
