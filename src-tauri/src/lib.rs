@@ -6043,6 +6043,31 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
     // Only try to fetch if proxy is running
     let proxy_running = state.proxy_status.lock().unwrap().running;
     if proxy_running {
+        let parse_usage_limit = |message: &str| -> (Option<i64>, Option<i64>) {
+            let mut resets_at = None;
+            let mut resets_in_seconds = None;
+            if let Some(start) = message.find('{') {
+                let json_part = message[start..].trim();
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_part) {
+                    let error_obj = value.get("error").unwrap_or(&value);
+                    resets_at = error_obj.get("resets_at").and_then(|v| v.as_i64());
+                    resets_in_seconds = error_obj
+                        .get("resets_in_seconds")
+                        .and_then(|v| v.as_i64());
+                } else if let Some(end) = json_part.rfind('}') {
+                    if let Ok(value) =
+                        serde_json::from_str::<serde_json::Value>(&json_part[..=end])
+                    {
+                        let error_obj = value.get("error").unwrap_or(&value);
+                        resets_at = error_obj.get("resets_at").and_then(|v| v.as_i64());
+                        resets_in_seconds = error_obj
+                            .get("resets_in_seconds")
+                            .and_then(|v| v.as_i64());
+                    }
+                }
+            }
+            (resets_at, resets_in_seconds)
+        };
         let client = build_management_client();
         match client
             .get(&url)
@@ -6071,9 +6096,37 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
                                 .replace("\"updated_at\"", "\"updatedAt\"")
                                 .replace("\"last_refresh\"", "\"lastRefresh\"")
                                 .replace("\"success_count\"", "\"successCount\"")
-                                .replace("\"failure_count\"", "\"failureCount\"");
-                                
-                            if let Ok(parsed) = serde_json::from_str::<Vec<AuthFile>>(&converted) {
+                                .replace("\"failure_count\"", "\"failureCount\"")
+                                .replace("\"rate_limited\"", "\"rateLimited\"")
+                                .replace("\"rate_limit_reset_at\"", "\"rateLimitResetAt\"")
+                                .replace("\"rate_limit_reason\"", "\"rateLimitReason\"")
+                                .replace("\"blacklisted_until\"", "\"blacklistedUntil\"");
+
+                            if let Ok(mut parsed) = serde_json::from_str::<Vec<AuthFile>>(&converted) {
+                                let now = chrono::Utc::now();
+                                for file in parsed.iter_mut() {
+                                    let status_message = file.status_message.as_deref().unwrap_or("");
+                                    if status_message.contains("usage_limit_reached") {
+                                        file.rate_limited = Some(true);
+                                        file.rate_limit_reason = Some("usage_limit_reached".to_string());
+
+                                        let (resets_at, resets_in_seconds) =
+                                            parse_usage_limit(status_message);
+                                        if let Some(epoch) = resets_at {
+                                            if let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp(epoch, 0) {
+                                                let iso = dt.to_rfc3339();
+                                                file.rate_limit_reset_at = Some(iso.clone());
+                                                file.blacklisted_until = Some(iso);
+                                            }
+                                        } else if let Some(seconds) = resets_in_seconds {
+                                            if let Some(dt) = now.checked_add_signed(chrono::Duration::seconds(seconds)) {
+                                                let iso = dt.to_rfc3339();
+                                                file.rate_limit_reset_at = Some(iso.clone());
+                                                file.blacklisted_until = Some(iso);
+                                            }
+                                        }
+                                    }
+                                }
                                 files = parsed;
                             }
                         }
@@ -6114,6 +6167,11 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
                                     name: dummy_id,
                                     provider,
                                     status: "disabled".to_string(),
+                                    status_message: None,
+                                    rate_limited: None,
+                                    rate_limit_reset_at: None,
+                                    rate_limit_reason: None,
+                                    blacklisted_until: None,
                                     disabled: true,
                                     unavailable: false,
                                     runtime_only: false,
@@ -6133,7 +6191,6 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
                                     success_count: None,
                                     failure_count: None,
                                     label: None,
-                                    status_message: None,
                                 };
                                 
                                 files.push(disabled_file);

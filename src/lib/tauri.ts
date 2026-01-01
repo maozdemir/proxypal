@@ -877,6 +877,10 @@ export interface AuthFile {
 	label?: string;
 	status: "ready" | "error" | "disabled";
 	statusMessage?: string;
+	rateLimited?: boolean;
+	rateLimitResetAt?: string;
+	rateLimitReason?: string;
+	blacklistedUntil?: string;
 	disabled: boolean;
 	unavailable: boolean;
 	runtimeOnly: boolean;

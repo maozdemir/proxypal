@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import {
@@ -53,6 +53,44 @@ export function AuthFilesPage() {
 		} else {
 			setFiles([]);
 		}
+	});
+
+	const isRateLimitedActive = (file: AuthFile) => {
+		const until = file.blacklistedUntil || file.rateLimitResetAt;
+		if (!until) return file.rateLimited === true;
+		const untilTime = Date.parse(until);
+		return Number.isFinite(untilTime) && Date.now() < untilTime;
+	};
+
+	const formatResetTime = (iso?: string) => {
+		if (!iso) return "-";
+		const date = new Date(iso);
+		if (Number.isNaN(date.getTime())) return "-";
+		return date.toLocaleDateString() + " " + date.toLocaleTimeString();
+	};
+
+	const earliestBlacklistExpiry = createMemo(() => {
+		const times = files()
+			.map((file) => {
+				const until = file.blacklistedUntil || file.rateLimitResetAt;
+				return until ? Date.parse(until) : NaN;
+			})
+			.filter((time) => Number.isFinite(time) && time > Date.now()) as number[];
+		if (times.length === 0) return null;
+		return Math.min(...times);
+	});
+
+	createEffect(() => {
+		const expiry = earliestBlacklistExpiry();
+		if (!expiry) return undefined;
+		const delayMs = Math.max(0, expiry - Date.now()) + 250;
+		const timeoutId = setTimeout(() => {
+			if (proxyStatus().running) {
+				loadFiles();
+			}
+		}, delayMs);
+		onCleanup(() => clearTimeout(timeoutId));
+		return undefined;
 	});
 
 	const loadFiles = async () => {
@@ -117,6 +155,15 @@ export function AuthFilesPage() {
 	};
 
 	const handleToggle = async (file: AuthFile) => {
+		if (isRateLimitedActive(file)) {
+			toastStore.warning(
+				"Rate limited",
+				`This account is rate limited until ${formatResetTime(
+					file.blacklistedUntil || file.rateLimitResetAt,
+				)}.`,
+			);
+			return;
+		}
 		try {
 			// Optimistic UI update
 			setFiles((prev) =>
@@ -420,6 +467,11 @@ export function AuthFilesPage() {
 																	Error
 																</span>
 															</Show>
+															<Show when={isRateLimitedActive(file)}>
+																<span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+																	Rate limited
+																</span>
+															</Show>
 															<Show when={file.disabled}>
 																<span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600">
 																	Disabled
@@ -457,6 +509,11 @@ export function AuthFilesPage() {
 														<Show when={file.statusMessage}>
 															<div class="mt-2 text-sm text-red-600 dark:text-red-400">
 																{file.statusMessage}
+															</div>
+														</Show>
+														<Show when={isRateLimitedActive(file)}>
+															<div class="mt-2 text-sm text-amber-700 dark:text-amber-400">
+																Resets at {formatResetTime(file.blacklistedUntil || file.rateLimitResetAt)}
 															</div>
 														</Show>
 
@@ -511,11 +568,18 @@ export function AuthFilesPage() {
 													</button>
 													<button
 														onClick={() => handleToggle(file)}
+														disabled={isRateLimitedActive(file)}
 														class={`p-2 rounded-lg transition-colors ${file.disabled
 															? "text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
 															: "text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-															}`}
-														title={file.disabled ? "Enable" : "Disable"}
+															} ${isRateLimitedActive(file) ? "opacity-50 cursor-not-allowed" : ""}`}
+														title={isRateLimitedActive(file)
+															? `Rate limited until ${formatResetTime(
+																file.blacklistedUntil || file.rateLimitResetAt,
+															)}`
+															: file.disabled
+																? "Enable"
+																: "Disable"}
 													>
 														<Show when={!file.disabled}>
 															<svg
