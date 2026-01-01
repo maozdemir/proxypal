@@ -694,7 +694,23 @@ async fn start_proxy(
     } else {
         let mut mappings = String::from("  model-mappings:");
         for mapping in &enabled_mappings {
-            mappings.push_str(&format!("\n    - from: {}\n      to: {}", mapping.name, mapping.alias));
+            let primary = mapping.alias.trim();
+            if primary.is_empty() {
+                continue;
+            }
+            mappings.push_str(&format!(
+                "\n    - from: {}\n      to: {}",
+                mapping.name, primary
+            ));
+            for fallback in &mapping.fallbacks {
+                let fallback_trimmed = fallback.trim();
+                if !fallback_trimmed.is_empty() && fallback_trimmed != primary {
+                    mappings.push_str(&format!(
+                        "\n    - from: {}\n      to: {}",
+                        mapping.name, fallback_trimmed
+                    ));
+                }
+            }
         }
         mappings
     };
@@ -5639,8 +5655,11 @@ async fn get_claude_code_settings() -> Result<crate::types::agents::ClaudeCodeSe
     if !config_path.exists() {
         return Ok(crate::types::agents::ClaudeCodeSettings {
             haiku_model: None,
+            haiku_fallback_models: Vec::new(),
             opus_model: None,
+            opus_fallback_models: Vec::new(),
             sonnet_model: None,
+            sonnet_fallback_models: Vec::new(),
             base_url: None,
             auth_token: None,
         });
@@ -5650,18 +5669,33 @@ async fn get_claude_code_settings() -> Result<crate::types::agents::ClaudeCodeSe
     let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
     
     let env = json.get("env").and_then(|e| e.as_object());
-    
+    let parse_fallbacks = |key: &str| -> Vec<String> {
+        env.and_then(|e| e.get(key))
+            .and_then(|v| v.as_str())
+            .map(|raw| {
+                raw.split(',')
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .map(String::from)
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default()
+    };
+
     Ok(crate::types::agents::ClaudeCodeSettings {
         haiku_model: env.and_then(|e| e.get("ANTHROPIC_DEFAULT_HAIKU_MODEL")).and_then(|v| v.as_str()).map(String::from),
+        haiku_fallback_models: parse_fallbacks("ANTHROPIC_DEFAULT_HAIKU_MODEL_FALLBACKS"),
         opus_model: env.and_then(|e| e.get("ANTHROPIC_DEFAULT_OPUS_MODEL")).and_then(|v| v.as_str()).map(String::from),
+        opus_fallback_models: parse_fallbacks("ANTHROPIC_DEFAULT_OPUS_MODEL_FALLBACKS"),
         sonnet_model: env.and_then(|e| e.get("ANTHROPIC_DEFAULT_SONNET_MODEL")).and_then(|v| v.as_str()).map(String::from),
+        sonnet_fallback_models: parse_fallbacks("ANTHROPIC_DEFAULT_SONNET_MODEL_FALLBACKS"),
         base_url: env.and_then(|e| e.get("ANTHROPIC_BASE_URL")).and_then(|v| v.as_str()).map(String::from),
         auth_token: env.and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN")).and_then(|v| v.as_str()).map(String::from),
     })
 }
 
 #[tauri::command]
-async fn set_claude_code_model(model_type: String, model_name: String) -> Result<(), String> {
+async fn set_claude_code_model(model_type: String, model_name: String, fallback_models: Vec<String>) -> Result<(), String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let config_dir = home.join(".claude");
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
@@ -5681,16 +5715,37 @@ async fn set_claude_code_model(model_type: String, model_name: String) -> Result
     }
     
     // Map model_type to env var name
-    let env_key = match model_type.as_str() {
-        "haiku" => "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-        "opus" => "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "sonnet" => "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    let (env_key, fallback_key) = match model_type.as_str() {
+        "haiku" => (
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_FALLBACKS",
+        ),
+        "opus" => (
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_FALLBACKS",
+        ),
+        "sonnet" => (
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_FALLBACKS",
+        ),
         _ => return Err(format!("Unknown model type: {}", model_type)),
     };
-    
+
+    let fallback_value = fallback_models
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<String>>()
+        .join(", ");
+
     // Update the model
     if let Some(env) = json.get_mut("env").and_then(|e| e.as_object_mut()) {
         env.insert(env_key.to_string(), serde_json::Value::String(model_name));
+        if fallback_value.is_empty() {
+            env.remove(fallback_key);
+        } else {
+            env.insert(fallback_key.to_string(), serde_json::Value::String(fallback_value));
+        }
     }
     
     // Write back

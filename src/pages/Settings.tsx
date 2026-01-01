@@ -304,8 +304,11 @@ export function SettingsPage() {
 	const [claudeCodeSettings, setClaudeCodeSettings] =
 		createSignal<ClaudeCodeSettings>({
 			haikuModel: null,
+			haikuFallbackModels: [],
 			opusModel: null,
+			opusFallbackModels: [],
 			sonnetModel: null,
+			sonnetFallbackModels: [],
 			baseUrl: null,
 			authToken: null,
 		});
@@ -331,10 +334,14 @@ export function SettingsPage() {
 				| "haiku"
 				| "opus"
 				| "sonnet";
-			await setClaudeCodeModel(backendModelType, modelName);
+			const fallbackKey = `${modelType.replace("Model", "FallbackModels")}` as keyof ClaudeCodeSettings;
+			const fallbackModels = (claudeCodeSettings()[fallbackKey] as string[]) || [];
+			const sanitizedFallbacks = sanitizeFallbacks(modelName || "", fallbackModels);
+			await setClaudeCodeModel(backendModelType, modelName, sanitizedFallbacks);
 			setClaudeCodeSettings((prev) => ({
 				...prev,
 				[modelType]: modelName || null,
+				[fallbackKey]: sanitizedFallbacks,
 			}));
 			toastStore.success("Claude Code model updated");
 		} catch (error) {
@@ -851,16 +858,80 @@ export function SettingsPage() {
 		return mappings.find((m) => m.name === slot.fromModel);
 	};
 
+	const sanitizeFallbacks = (primary: string, fallbacks?: string[]) => {
+		const trimmedPrimary = primary.trim();
+		if (!trimmedPrimary) {
+			return [];
+		}
+		const seen = new Set<string>();
+		const result: string[] = [];
+		for (const fallback of fallbacks || []) {
+			const candidate = fallback.trim();
+			if (!candidate || candidate === trimmedPrimary || seen.has(candidate)) {
+				continue;
+			}
+			seen.add(candidate);
+			result.push(candidate);
+		}
+		return result;
+	};
+
+	const setClaudeCodeFallbacks = async (
+		modelType: "haikuModel" | "opusModel" | "sonnetModel",
+		fallbacks: string[],
+	) => {
+		try {
+			const backendModelType = modelType.replace("Model", "") as
+				| "haiku"
+				| "opus"
+				| "sonnet";
+			const primary = (claudeCodeSettings()[modelType] || "") as string;
+			const sanitized = sanitizeFallbacks(primary, fallbacks);
+			await setClaudeCodeModel(backendModelType, primary, sanitized);
+			const fallbackKey = `${modelType.replace("Model", "FallbackModels")}` as keyof ClaudeCodeSettings;
+			setClaudeCodeSettings((prev) => ({
+				...prev,
+				[fallbackKey]: sanitized,
+			}));
+			toastStore.success("Claude Code fallback updated");
+		} catch (error) {
+			console.error("Failed to save Claude Code fallback:", error);
+			toastStore.error(`Failed to save setting: ${error}`);
+		}
+	};
+
+	const moveItem = (list: string[], fromIndex: number, toIndex: number) => {
+		if (
+			toIndex < 0 ||
+			toIndex >= list.length ||
+			fromIndex < 0 ||
+			fromIndex >= list.length ||
+			fromIndex === toIndex
+		) {
+			return list;
+		}
+		const next = [...list];
+		const [item] = next.splice(fromIndex, 1);
+		next.splice(toIndex, 0, item);
+		return next;
+	};
+
 	// Update mapping for a slot
 	const updateSlotMapping = async (
 		slotId: string,
 		toModel: string,
 		enabled: boolean,
+		fallbacks?: string[],
 	) => {
 		const slot = AMP_MODEL_SLOTS.find((s) => s.id === slotId);
 		if (!slot) return;
 
 		const currentMappings = config().ampModelMappings || [];
+		const existingMapping = currentMappings.find(
+			(m) => m.name === slot.fromModel,
+		);
+		const existingAlias = existingMapping?.alias || "";
+		const existingFallbacks = existingMapping?.fallbacks;
 		// Remove existing mapping for this slot
 		const filteredMappings = currentMappings.filter(
 			(m) => m.name !== slot.fromModel,
@@ -871,7 +942,23 @@ export function SettingsPage() {
 		if (enabled && toModel) {
 			newMappings = [
 				...filteredMappings,
-				{ name: slot.fromModel, alias: toModel, enabled: true },
+				{
+					name: slot.fromModel,
+					alias: toModel,
+					fallbacks: sanitizeFallbacks(toModel, fallbacks),
+					enabled: true,
+				},
+			];
+		} else if (!enabled && (toModel || existingAlias)) {
+			const alias = toModel || existingAlias;
+			newMappings = [
+				...filteredMappings,
+				{
+					name: slot.fromModel,
+					alias,
+					fallbacks: sanitizeFallbacks(alias, fallbacks ?? existingFallbacks),
+					enabled: false,
+				},
 			];
 		} else {
 			newMappings = filteredMappings;
@@ -919,6 +1006,7 @@ export function SettingsPage() {
 		const newMapping: AmpModelMapping = {
 			name: from,
 			alias: to,
+			fallbacks: [],
 			enabled: true,
 		};
 		const newMappings = [...existingMappings, newMapping];
@@ -1002,10 +1090,18 @@ export function SettingsPage() {
 		fromModel: string,
 		newToModel: string,
 		enabled: boolean,
+		fallbacks?: string[],
 	) => {
 		const currentMappings = config().ampModelMappings || [];
 		const newMappings = currentMappings.map((m) =>
-			m.name === fromModel ? { ...m, to: newToModel, enabled } : m,
+			m.name === fromModel
+				? {
+					...m,
+					alias: newToModel,
+					fallbacks: sanitizeFallbacks(newToModel, fallbacks ?? m.fallbacks),
+					enabled,
+				}
+				: m,
 		);
 
 		const newConfig = { ...config(), ampModelMappings: newMappings };
@@ -1077,6 +1173,111 @@ export function SettingsPage() {
 
 		return { customModels, builtInModels: groupedModels };
 	};
+
+	const getFilteredTargetModels = (exclude: Set<string>) => {
+		const { customModels, builtInModels } = getAvailableTargetModels();
+		const filterList = (items: { value: string; label: string }[]) =>
+			items.filter((item) => !exclude.has(item.value));
+		return {
+			customModels: filterList(customModels),
+			builtInModels: {
+				anthropic: filterList(builtInModels.anthropic),
+				google: filterList(builtInModels.google),
+				openai: filterList(builtInModels.openai),
+				qwen: filterList(builtInModels.qwen),
+				iflow: filterList(builtInModels.iflow),
+				copilot: filterList(builtInModels.copilot),
+			},
+		};
+	};
+
+	const getDefaultFallbackTarget = (primary: string, existing: string[]) => {
+		const { customModels, builtInModels } = getAvailableTargetModels();
+		const used = new Set([primary, ...existing]);
+		const candidates = [
+			...customModels,
+			...builtInModels.anthropic,
+			...builtInModels.google,
+			...builtInModels.openai,
+			...builtInModels.qwen,
+			...builtInModels.iflow,
+			...builtInModels.copilot,
+		]
+			.map((model) => model.value)
+			.filter((value) => value);
+		return candidates.find((value) => !used.has(value)) || "";
+	};
+
+	const renderTargetOptions = (
+		customModels: { value: string; label: string }[],
+		builtInModels: {
+			anthropic: { value: string; label: string }[];
+			google: { value: string; label: string }[];
+			openai: { value: string; label: string }[];
+			qwen: { value: string; label: string }[];
+			iflow: { value: string; label: string }[];
+			copilot: { value: string; label: string }[];
+		},
+	) => (
+		<>
+			<option value="">Select target...</option>
+			<Show when={customModels.length > 0}>
+				<optgroup label="Custom Provider">
+					<For each={customModels}>
+						{(model) => (
+							<option value={model.value}>{model.label}</option>
+						)}
+					</For>
+				</optgroup>
+			</Show>
+			<optgroup label="Anthropic">
+				<For each={builtInModels.anthropic}>
+					{(model) => (
+						<option value={model.value}>{model.label}</option>
+					)}
+				</For>
+			</optgroup>
+			<optgroup label="Google">
+				<For each={builtInModels.google}>
+					{(model) => (
+						<option value={model.value}>{model.label}</option>
+					)}
+				</For>
+			</optgroup>
+			<optgroup label="OpenAI">
+				<For each={builtInModels.openai}>
+					{(model) => (
+						<option value={model.value}>{model.label}</option>
+					)}
+				</For>
+			</optgroup>
+			<optgroup label="Qwen">
+				<For each={builtInModels.qwen}>
+					{(model) => (
+						<option value={model.value}>{model.label}</option>
+					)}
+				</For>
+			</optgroup>
+			<Show when={builtInModels.iflow.length > 0}>
+				<optgroup label="iFlow">
+					<For each={builtInModels.iflow}>
+						{(model) => (
+							<option value={model.value}>{model.label}</option>
+						)}
+					</For>
+				</optgroup>
+			</Show>
+			<Show when={builtInModels.copilot.length > 0}>
+				<optgroup label="GitHub Copilot">
+					<For each={builtInModels.copilot}>
+						{(model) => (
+							<option value={model.value}>{model.label}</option>
+						)}
+					</For>
+				</optgroup>
+			</Show>
+		</>
+	);
 
 	const handleConfigChange = async (
 		key: keyof ReturnType<typeof config>,
@@ -1501,7 +1702,7 @@ export function SettingsPage() {
 									exposing proxy publicly.
 								</p>
 								<p class="mt-1 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded">
-									⚠️ Changing this key requires a proxy restart to take effect.
+									! Changing this key requires a proxy restart to take effect.
 								</p>
 							</label>
 
@@ -1815,102 +2016,207 @@ export function SettingsPage() {
 										label: string;
 										value: string | null;
 										modelType: "haikuModel" | "opusModel" | "sonnetModel";
-									}) => (
-										<label class="block">
-											<span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-												{props.label}
-											</span>
-											<select
-												value={props.value || ""}
-												onChange={(e) =>
-													handleClaudeCodeSettingChange(
-														props.modelType,
-														e.currentTarget.value,
-													)
-												}
-												class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100"
-											>
-												<option value="">Select model...</option>
-												<Show when={customModels.length > 0}>
-													<optgroup label="Custom Providers">
-														<For each={customModels}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
+									}) => {
+										const fallbackKey = `${props.modelType.replace("Model", "FallbackModels")}` as keyof ClaudeCodeSettings;
+										const currentFallbacks = () =>
+											(claudeCodeSettings()[fallbackKey] as string[]) || [];
+										return (
+											<label class="block">
+												<span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+													{props.label}
+												</span>
+												<select
+													value={props.value || ""}
+													onChange={(e) =>
+														handleClaudeCodeSettingChange(
+															props.modelType,
+															e.currentTarget.value,
+														)
+													}
+													class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100"
+												>
+													<option value="">Select model...</option>
+													<Show when={customModels.length > 0}>
+														<optgroup label="Custom Providers">
+															<For each={customModels}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+													<Show when={builtInModels.anthropic.length > 0}>
+														<optgroup label="Anthropic">
+															<For each={builtInModels.anthropic}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+													<Show when={builtInModels.google.length > 0}>
+														<optgroup label="Google">
+															<For each={builtInModels.google}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+													<Show when={builtInModels.openai.length > 0}>
+														<optgroup label="OpenAI">
+															<For each={builtInModels.openai}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+													<Show when={builtInModels.copilot.length > 0}>
+														<optgroup label="GitHub Copilot">
+															<For each={builtInModels.copilot}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+													<Show when={builtInModels.qwen.length > 0}>
+														<optgroup label="Qwen">
+															<For each={builtInModels.qwen}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+													<Show when={builtInModels.iflow.length > 0}>
+														<optgroup label="iFlow">
+															<For each={builtInModels.iflow}>
+																{(model) => (
+																	<option value={model.value}>
+																		{model.label}
+																	</option>
+																)}
+															</For>
+														</optgroup>
+													</Show>
+												</select>
+												<Show when={props.value}>
+													<div class="w-full pt-2">
+														<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Fallbacks</div>
+														<div class="space-y-2">
+															<For each={currentFallbacks()}>
+																{(fallback, index) => {
+																	const exclude = new Set([
+																		props.value || "",
+																		...currentFallbacks(),
+																	]);
+																	exclude.delete(fallback);
+																	const { customModels, builtInModels } =
+																		getFilteredTargetModels(exclude);
+																	return (
+																		<div class="flex items-center gap-2">
+																			<select
+																				value={fallback}
+																				onChange={(e) => {
+																					const updated = [...currentFallbacks()];
+																					updated[index()] = e.currentTarget.value;
+																					setClaudeCodeFallbacks(props.modelType, updated);
+																				}}
+																				class="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth"
+																			>
+																					{renderTargetOptions(customModels, builtInModels)}
+																			</select>
+																			<div class="flex items-center gap-1">
+																				<button
+																					type="button"
+																					onClick={() =>
+																						setClaudeCodeFallbacks(
+																							props.modelType,
+																							moveItem(
+																								currentFallbacks(),
+																								index(),
+																								index() - 1,
+																							),
+																						)
+																					}
+																					class="px-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+																					disabled={index() === 0}
+																				>
+																					^
+																				</button>
+																				<button
+																					type="button"
+																					onClick={() =>
+																						setClaudeCodeFallbacks(
+																							props.modelType,
+																							moveItem(
+																								currentFallbacks(),
+																								index(),
+																								index() + 1,
+																							),
+																						)
+																					}
+																					class="px-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+																					disabled={index() === currentFallbacks().length - 1}
+																				>
+																					v
+																				</button>
+																				<button
+																					type="button"
+																					onClick={() => {
+																						const updated = currentFallbacks().filter(
+																							(_, idx) => idx !== index(),
+																						);
+																						setClaudeCodeFallbacks(props.modelType, updated);
+																					}}
+																					class="px-1 text-gray-400 hover:text-red-500"
+																				>
+																					x
+																				</button>
+																			</div>
+																		</div>
+																	);
+																}}
+															</For>
+															<button
+																type="button"
+																onClick={() => {
+																	const next = getDefaultFallbackTarget(
+																		props.value || "",
+																		currentFallbacks(),
+																	);
+																	if (!next) {
+																		return;
+																	}
+																	setClaudeCodeFallbacks(props.modelType, [
+																		...currentFallbacks(),
+																		next,
+																	]);
+																}}
+																class="text-xs text-brand-600 hover:text-brand-700"
+															>
+																+ Add fallback
+															</button>
+														</div>
+													</div>
 												</Show>
-												<Show when={builtInModels.anthropic.length > 0}>
-													<optgroup label="Anthropic">
-														<For each={builtInModels.anthropic}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
-												</Show>
-												<Show when={builtInModels.google.length > 0}>
-													<optgroup label="Google">
-														<For each={builtInModels.google}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
-												</Show>
-												<Show when={builtInModels.openai.length > 0}>
-													<optgroup label="OpenAI">
-														<For each={builtInModels.openai}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
-												</Show>
-												<Show when={builtInModels.copilot.length > 0}>
-													<optgroup label="GitHub Copilot">
-														<For each={builtInModels.copilot}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
-												</Show>
-												<Show when={builtInModels.qwen.length > 0}>
-													<optgroup label="Qwen">
-														<For each={builtInModels.qwen}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
-												</Show>
-												<Show when={builtInModels.iflow.length > 0}>
-													<optgroup label="iFlow">
-														<For each={builtInModels.iflow}>
-															{(model) => (
-																<option value={model.value}>
-																	{model.label}
-																</option>
-															)}
-														</For>
-													</optgroup>
-												</Show>
-											</select>
-										</label>
-									);
+											</label>
+										);
+									};
 
 									return (
 										<>
@@ -2030,19 +2336,17 @@ export function SettingsPage() {
 											onClick={() =>
 												handleForceModelMappingsChange(!forceModelMappings())
 											}
-											class={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 ${
-												forceModelMappings()
+											class={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 ${forceModelMappings()
 													? "bg-brand-600"
 													: "bg-gray-200 dark:bg-gray-700"
-											}`}
+												}`}
 										>
 											<span
 												aria-hidden="true"
-												class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-													forceModelMappings()
+												class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${forceModelMappings()
 														? "translate-x-5"
 														: "translate-x-0"
-												}`}
+													}`}
 											/>
 										</button>
 									</div>
@@ -2053,8 +2357,9 @@ export function SettingsPage() {
 									<For each={AMP_MODEL_SLOTS}>
 										{(slot) => {
 											const mapping = () => getMappingForSlot(slot.id);
-											const isEnabled = () => !!mapping();
+											const isEnabled = () => (mapping() ? mapping()?.enabled !== false : false);
 											const currentTarget = () => mapping()?.alias || "";
+											const currentFallbacks = () => mapping()?.fallbacks || [];
 
 											return (
 												<div class="p-3 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -2078,9 +2383,15 @@ export function SettingsPage() {
 																			slot.id,
 																			defaultTarget,
 																			true,
+																			currentFallbacks(),
 																		);
 																	} else {
-																		updateSlotMapping(slot.id, "", false);
+																		updateSlotMapping(
+																			slot.id,
+																			currentTarget(),
+																			false,
+																			currentFallbacks(),
+																		);
 																	}
 																}}
 																class="w-4 h-4 text-brand-500 bg-gray-100 border-gray-300 rounded focus:ring-brand-500 dark:focus:ring-brand-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
@@ -2102,7 +2413,7 @@ export function SettingsPage() {
 
 															{/* Arrow */}
 															<span class="text-gray-400 text-xs shrink-0">
-																→
+																-&gt;
 															</span>
 
 															{/* To model (dropdown) */}
@@ -2118,14 +2429,14 @@ export function SettingsPage() {
 																				slot.id,
 																				newTarget,
 																				true,
+																				currentFallbacks(),
 																			);
 																		}}
 																		disabled={!isEnabled()}
-																		class={`flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100 ${
-																			!isEnabled()
+																		class={`flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100 ${!isEnabled()
 																				? "opacity-50 cursor-not-allowed"
 																				: ""
-																		}`}
+																			}`}
 																	>
 																		<option value="">Select target...</option>
 																		<Show when={customModels.length > 0}>
@@ -2202,6 +2513,128 @@ export function SettingsPage() {
 																	</select>
 																);
 															})()}
+
+															{/* Fallback list */}
+															<Show when={isEnabled() && currentTarget()}>
+																<div class="w-full pt-2">
+																	<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Fallbacks</div>
+																	<div class="space-y-2">
+																		<For each={currentFallbacks()}>
+																			{(fallback, index) => {
+																				const exclude = new Set([
+																					currentTarget(),
+																					...currentFallbacks(),
+																				]);
+																				exclude.delete(fallback);
+																				const { customModels, builtInModels } =
+																					getFilteredTargetModels(exclude);
+																				return (
+																					<div class="flex items-center gap-2">
+																						<select
+																							value={fallback}
+																							onChange={(e) => {
+																								const updated = [...currentFallbacks()];
+																								updated[index()] = e.currentTarget.value;
+																								updateSlotMapping(
+																									slot.id,
+																									currentTarget(),
+																									true,
+																									updated,
+																								);
+																							}}
+																							class="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth"
+																						>
+																							{renderTargetOptions(customModels, builtInModels)}
+																						</select>
+																						<div class="flex items-center gap-1">
+																							<button
+																								type="button"
+																								onClick={() =>
+																									updateSlotMapping(
+																										slot.id,
+																										currentTarget(),
+																										true,
+																										moveItem(
+																											currentFallbacks(),
+																											index(),
+																											index() - 1,
+																										),
+																									)
+																								}
+																								class="px-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+																								disabled={index() === 0}
+																							>
+																								^
+																							</button>
+																							<button
+																								type="button"
+																								onClick={() =>
+																									updateSlotMapping(
+																										slot.id,
+																										currentTarget(),
+																										true,
+																										moveItem(
+																											currentFallbacks(),
+																											index(),
+																											index() + 1,
+																										),
+																									)
+																								}
+																								class="px-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+																								disabled={index() === currentFallbacks().length - 1}
+																							>
+																								v
+																							</button>
+																							<button
+																								type="button"
+																								onClick={() => {
+																									const updated = currentFallbacks().filter(
+																										(_, idx) => idx !== index(),
+																									);
+																									updateSlotMapping(
+																										slot.id,
+																										currentTarget(),
+																										true,
+																										updated,
+																									);
+																								}}
+																								class="px-1 text-gray-400 hover:text-red-500"
+																							>
+																								x
+																							</button>
+																						</div>
+																					</div>
+																				);
+																			}
+																			}
+																		</For>
+																		<button
+																			type="button"
+																			onClick={() => {
+																				const next = getDefaultFallbackTarget(
+																					currentTarget(),
+																					currentFallbacks(),
+																				);
+																				if (!next) {
+																					return;
+																				}
+																				updateSlotMapping(
+																					slot.id,
+																					currentTarget(),
+																					true,
+																					[...currentFallbacks(), next],
+																				);
+																			}}
+																			class="text-xs text-brand-600 hover:text-brand-700"
+																		>
+																			+ Add fallback
+																		</button>
+																	</div>
+																</div>
+															</Show>
+
+
+
 														</div>
 													</div>
 												</div>
@@ -2221,6 +2654,7 @@ export function SettingsPage() {
 										{(mapping) => {
 											const { customModels, builtInModels } =
 												getAvailableTargetModels();
+											const currentFallbacks = () => mapping.fallbacks || [];
 											return (
 												<div class="p-3 mb-2 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
 													<div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -2234,6 +2668,7 @@ export function SettingsPage() {
 																		mapping.name,
 																		mapping.alias,
 																		e.currentTarget.checked,
+																		currentFallbacks(),
 																	);
 																}}
 																class="w-4 h-4 text-brand-500 bg-gray-100 border-gray-300 rounded focus:ring-brand-500 dark:focus:ring-brand-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
@@ -2255,7 +2690,7 @@ export function SettingsPage() {
 
 															{/* Arrow */}
 															<span class="text-gray-400 text-xs shrink-0">
-																→
+																-&gt;
 															</span>
 
 															{/* To model (dropdown) */}
@@ -2266,14 +2701,14 @@ export function SettingsPage() {
 																		mapping.name,
 																		e.currentTarget.value,
 																		mapping.enabled !== false,
+																		currentFallbacks(),
 																	);
 																}}
 																disabled={mapping.enabled === false}
-																class={`flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100 ${
-																	mapping.enabled === false
+																class={`flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100 ${mapping.enabled === false
 																		? "opacity-50 cursor-not-allowed"
 																		: ""
-																}`}
+																	}`}
 															>
 																<option value="">Select target...</option>
 																<Show when={customModels.length > 0}>
@@ -2346,6 +2781,124 @@ export function SettingsPage() {
 																	</optgroup>
 																</Show>
 															</select>
+															{/* Fallback list */}
+															<Show when={mapping.enabled !== false && mapping.alias}>
+																<div class="w-full pt-2">
+																	<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Fallbacks</div>
+																	<div class="space-y-2">
+																		<For each={currentFallbacks()}>
+																			{(fallback, index) => {
+																				const exclude = new Set([
+																					mapping.alias,
+																					...currentFallbacks(),
+																				]);
+																				exclude.delete(fallback);
+																				const { customModels, builtInModels } =
+																					getFilteredTargetModels(exclude);
+																				return (
+																					<div class="flex items-center gap-2">
+																						<select
+																							value={fallback}
+																							onChange={(e) => {
+																								const updated = [...currentFallbacks()];
+																								updated[index()] = e.currentTarget.value;
+																								updateCustomMapping(
+																									mapping.name,
+																									mapping.alias,
+																									mapping.enabled !== false,
+																									updated,
+																								);
+																							}}
+																							class="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth"
+																						>
+																							{renderTargetOptions(customModels, builtInModels)}
+																						</select>
+																						<div class="flex items-center gap-1">
+																							<button
+																								type="button"
+																								onClick={() =>
+																									updateCustomMapping(
+																										mapping.name,
+																										mapping.alias,
+																										mapping.enabled !== false,
+																										moveItem(
+																											currentFallbacks(),
+																											index(),
+																											index() - 1,
+																										),
+																									)
+																								}
+																								class="px-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+																								disabled={index() === 0}
+																							>
+																								^
+																							</button>
+																							<button
+																								type="button"
+																								onClick={() =>
+																									updateCustomMapping(
+																										mapping.name,
+																										mapping.alias,
+																										mapping.enabled !== false,
+																										moveItem(
+																											currentFallbacks(),
+																											index(),
+																											index() + 1,
+																										),
+																									)
+																								}
+																								class="px-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+																								disabled={index() === currentFallbacks().length - 1}
+																							>
+																								v
+																							</button>
+																							<button
+																								type="button"
+																								onClick={() => {
+																									const updated = currentFallbacks().filter(
+																										(_, idx) => idx !== index(),
+																									);
+																									updateCustomMapping(
+																										mapping.name,
+																										mapping.alias,
+																										mapping.enabled !== false,
+																										updated,
+																									);
+																								}}
+																								class="px-1 text-gray-400 hover:text-red-500"
+																							>
+																								x
+																							</button>
+																						</div>
+																					</div>
+																				);
+																			}
+																			}
+																		</For>
+																		<button
+																			type="button"
+																			onClick={() => {
+																				const next = getDefaultFallbackTarget(
+																					mapping.alias,
+																					currentFallbacks(),
+																				);
+																				if (!next) {
+																					return;
+																				}
+																				updateCustomMapping(
+																					mapping.name,
+																					mapping.alias,
+																					mapping.enabled !== false,
+																					[...currentFallbacks(), next],
+																				);
+																			}}
+																			class="text-xs text-brand-600 hover:text-brand-700"
+																		>
+																			+ Add fallback
+																		</button>
+																	</div>
+																</div>
+															</Show>
 
 															{/* Delete button */}
 															<button
@@ -2390,7 +2943,7 @@ export function SettingsPage() {
 												class="flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-mono focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth"
 											/>
 											<span class="text-gray-400 text-xs shrink-0 hidden sm:inline">
-												→
+												-{">"}
 											</span>
 											{(() => {
 												const { customModels, builtInModels } =
@@ -2878,11 +3431,10 @@ export function SettingsPage() {
 											<Show when={providerTestResult()}>
 												{(result) => (
 													<div
-														class={`flex items-center gap-2 p-2 rounded-lg text-xs ${
-															result().success
+														class={`flex items-center gap-2 p-2 rounded-lg text-xs ${result().success
 																? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
 																: "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-														}`}
+															}`}
 													>
 														<Show
 															when={result().success}
@@ -3094,17 +3646,15 @@ export function SettingsPage() {
 										aria-checked={websocketAuth()}
 										disabled={savingWebsocketAuth()}
 										onClick={() => handleWebsocketAuthChange(!websocketAuth())}
-										class={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 ${
-											websocketAuth()
+										class={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 ${websocketAuth()
 												? "bg-brand-600"
 												: "bg-gray-200 dark:bg-gray-700"
-										}`}
+											}`}
 									>
 										<span
 											aria-hidden="true"
-											class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-												websocketAuth() ? "translate-x-5" : "translate-x-0"
-											}`}
+											class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${websocketAuth() ? "translate-x-5" : "translate-x-0"
+												}`}
 										/>
 									</button>
 								</div>
@@ -3577,11 +4127,10 @@ export function SettingsPage() {
 												</div>
 												<Show when={statusProps().message}>
 													<div
-														class={`text-xs mt-1 break-all flex items-start gap-1 ${
-															statusProps().status === "error"
+														class={`text-xs mt-1 break-all flex items-start gap-1 ${statusProps().status === "error"
 																? "text-red-500"
 																: "text-gray-500"
-														}`}
+															}`}
 													>
 														<span class="opacity-75">&gt;</span>
 														<span>{statusProps().message}</span>
@@ -3591,16 +4140,15 @@ export function SettingsPage() {
 											<div class="flex items-center gap-4">
 												<div class="flex items-center gap-2">
 													<div
-														class={`w-2.5 h-2.5 rounded-full ${
-															statusProps().status === "connected"
+														class={`w-2.5 h-2.5 rounded-full ${statusProps().status === "connected"
 																? "bg-green-500"
 																: statusProps().status === "error"
 																	? "bg-red-500"
 																	: statusProps().status === "connecting" ||
-																			statusProps().status === "reconnecting"
+																		statusProps().status === "reconnecting"
 																		? "bg-orange-500 animate-pulse"
 																		: "bg-gray-400"
-														}`}
+															}`}
 													/>
 													<span class="text-sm font-medium text-gray-600 dark:text-gray-400 capitalize min-w-[50px]">
 														{statusProps().status}
@@ -3837,22 +4385,21 @@ export function SettingsPage() {
 										<div class="flex items-center justify-between">
 											<div class="flex items-center gap-3">
 												<div
-													class={`w-3 h-3 rounded-full ${
-														status()?.status === "connected"
+													class={`w-3 h-3 rounded-full ${status()?.status === "connected"
 															? "bg-green-500"
 															: status()?.status === "connecting"
 																? "bg-yellow-500 animate-pulse"
 																: status()?.status === "error"
 																	? "bg-red-500"
 																	: "bg-gray-400"
-													}`}
+														}`}
 												/>
 												<div>
 													<p class="font-medium text-gray-900 dark:text-white">
 														{cf.name}
 													</p>
 													<p class="text-xs text-gray-500">
-														Port {cf.localPort} •{" "}
+														Port {cf.localPort} -{" "}
 														{status()?.message ||
 															(cf.enabled ? "Enabled" : "Disabled")}
 													</p>
@@ -3984,7 +4531,7 @@ export function SettingsPage() {
 										onInput={(e) => setCfToken(e.currentTarget.value)}
 									/>
 									<p class="text-[10px] text-gray-400">
-										Get token from Cloudflare Zero Trust Dashboard → Access →
+										Get token from Cloudflare Zero Trust Dashboard -{">"} Access -{">"}
 										Tunnels
 									</p>
 								</div>
@@ -4023,7 +4570,7 @@ export function SettingsPage() {
 									>
 										Cloudflare Zero Trust Dashboard
 									</a>{" "}
-									→ Networks → Tunnels
+									-{">"} Networks -{">"} Tunnels
 								</li>
 								<li>Create a new tunnel and copy the token</li>
 								<li>

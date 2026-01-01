@@ -92,6 +92,7 @@ export async function refreshAuthStatus(): Promise<AuthStatus> {
 export interface AmpModelMapping {
 	name: string;
 	alias: string;
+	fallbacks?: string[];
 	enabled?: boolean; // Whether this mapping is active
 }
 
@@ -1076,8 +1077,11 @@ export async function deleteOAuthExcludedModels(
 // Claude Code Settings
 export interface ClaudeCodeSettings {
 	haikuModel: string | null;
+	haikuFallbackModels?: string[];
 	opusModel: string | null;
+	opusFallbackModels?: string[];
 	sonnetModel: string | null;
+	sonnetFallbackModels?: string[];
 	baseUrl: string | null;
 	authToken: string | null;
 }
@@ -1089,8 +1093,13 @@ export async function getClaudeCodeSettings(): Promise<ClaudeCodeSettings> {
 export async function setClaudeCodeModel(
 	modelType: string,
 	modelName: string,
+	fallbackModels: string[] = [],
 ): Promise<void> {
-	return invoke("set_claude_code_model", { modelType, modelName });
+	return invoke("set_claude_code_model", {
+		modelType,
+		modelName,
+		fallbackModels,
+	});
 }
 
 // Raw Config YAML - for power users

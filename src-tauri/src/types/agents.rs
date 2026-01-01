@@ -42,8 +42,14 @@ pub struct AgentTestResult {
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeCodeSettings {
     pub haiku_model: Option<String>,
+    #[serde(default)]
+    pub haiku_fallback_models: Vec<String>,
     pub opus_model: Option<String>,
+    #[serde(default)]
+    pub opus_fallback_models: Vec<String>,
     pub sonnet_model: Option<String>,
+    #[serde(default)]
+    pub sonnet_fallback_models: Vec<String>,
     pub base_url: Option<String>,
     pub auth_token: Option<String>,
 }

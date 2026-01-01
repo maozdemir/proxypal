@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct AmpModelMapping {
     pub name: String,
     pub alias: String,
+    #[serde(default)]
+    pub fallbacks: Vec<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
