@@ -38,7 +38,7 @@ const TABS: Tab[] = [
 	{ id: "claude", label: "Claude", icon: "/logos/claude.svg" },
 	{ id: "codex", label: "Codex", icon: "/logos/openai.svg" },
 	{ id: "openai-compatible", label: "OpenAI", icon: "/logos/openai.svg" },
-	{ id: "vertex", label: "Vertex", icon: "/logos/gemini.svg" },
+	{ id: "vertex", label: "Vertex", icon: "/logos/vertex.svg" },
 ];
 
 export function ApiKeysPage() {
