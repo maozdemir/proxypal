@@ -1005,7 +1005,7 @@ export function SettingsPage() {
 	};
 
 	return (
-		<div class="min-h-screen flex flex-col">
+		<div class="min-h-screen flex flex-col bg-gradient-to-b from-gray-50 via-white to-white dark:from-gray-950 dark:via-gray-900 dark:to-gray-900">
 			{/* Header with Tabs */}
 			<SettingsHeader
 				appVersion={appVersion}
@@ -1016,15 +1016,20 @@ export function SettingsPage() {
 			/>
 
 			{/* Main content */}
-			<main class="flex-1 p-4 sm:p-6 overflow-y-auto">
-				<div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-4 sm:gap-6">
-					<SettingsSidebarNav
-						tabs={tabs}
-						activeTab={activeTab}
-						setActiveTab={setActiveTab}
+			<main class="flex-1 p-4 sm:p-6 overflow-y-auto relative">
+				<div class="max-w-6xl mx-auto">
+					<div
+						aria-hidden="true"
+						class="pointer-events-none absolute left-1/2 top-24 h-56 w-[min(900px,90vw)] -translate-x-1/2 rounded-full bg-gradient-to-r from-brand-100/60 via-white/0 to-brand-50/40 blur-3xl dark:from-brand-900/20 dark:via-gray-900/0 dark:to-brand-900/10"
 					/>
+					<div class="relative grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-4 sm:gap-6 rounded-2xl border border-gray-200/70 dark:border-gray-800/70 bg-white/70 dark:bg-gray-900/40 shadow-sm backdrop-blur p-3 sm:p-4">
+						<SettingsSidebarNav
+							tabs={tabs}
+							activeTab={activeTab}
+							setActiveTab={setActiveTab}
+						/>
 
-					<div class="space-y-4 sm:space-y-6 animate-stagger">
+						<div class="space-y-4 sm:space-y-6 animate-stagger">
 						<GeneralSettingsSection
 							activeTab={activeTab}
 							config={config}
@@ -1226,6 +1231,7 @@ export function SettingsPage() {
 						/>
 
 						<AboutSection activeTab={activeTab} appVersion={appVersion} />
+						</div>
 					</div>
 				</div>
 			</main>

@@ -15,7 +15,7 @@ export function SettingsHeader(props: SettingsHeaderProps) {
 	const { appVersion, saving, tabs, activeTab, setActiveTab } = props;
 
 	return (
-		<header class="sticky top-0 z-10 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+		<header class="sticky top-0 z-10 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200/70 dark:border-gray-800/70 bg-white/75 dark:bg-gray-900/55 backdrop-blur">
 			<div class="flex items-center justify-between gap-2 sm:gap-3 max-w-6xl mx-auto">
 				<div class="flex items-center gap-2 sm:gap-3">
 					<h1 class="font-bold text-lg text-gray-900 dark:text-gray-100">
@@ -55,11 +55,11 @@ export function SettingsHeader(props: SettingsHeaderProps) {
 							<button
 								type="button"
 								onClick={() => setActiveTab(tab.id)}
-								class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-none"
+								class="px-3 py-1.5 text-sm font-medium rounded-xl transition-all whitespace-nowrap flex-none"
 								classList={{
-									"bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400":
+									"bg-brand-100/80 dark:bg-brand-900/25 text-brand-700 dark:text-brand-300 shadow-sm":
 										activeTab() === tab.id,
-									"text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800":
+									"text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-gray-800/60 hover:shadow-sm":
 										activeTab() !== tab.id,
 								}}
 							>

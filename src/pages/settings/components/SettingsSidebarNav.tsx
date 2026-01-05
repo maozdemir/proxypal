@@ -19,11 +19,11 @@ export function SettingsSidebarNav(props: SettingsSidebarNavProps) {
 					<button
 						type="button"
 						onClick={() => setActiveTab(tab.id)}
-						class="px-3 py-2 text-sm font-medium rounded-lg transition-colors text-left w-full"
+						class="px-3 py-2 text-sm font-medium rounded-xl transition-all text-left w-full"
 						classList={{
-							"bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400":
+							"bg-brand-100/80 dark:bg-brand-900/25 text-brand-700 dark:text-brand-300 shadow-sm":
 								activeTab() === tab.id,
-							"text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800":
+							"text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-gray-800/60 hover:shadow-sm":
 								activeTab() !== tab.id,
 						}}
 					>
