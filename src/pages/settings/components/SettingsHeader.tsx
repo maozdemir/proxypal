@@ -13,6 +13,20 @@ export interface SettingsHeaderProps {
 
 export function SettingsHeader(props: SettingsHeaderProps) {
 	const { appVersion, saving, tabs, activeTab, setActiveTab } = props;
+	let tabRefs: HTMLButtonElement[] = [];
+
+	const focusTabAtIndex = (index: number) => {
+		queueMicrotask(() => tabRefs[index]?.focus());
+	};
+
+	const moveFocus = (currentIndex: number, delta: number) => {
+		const nextIndex =
+			(currentIndex + delta + tabs.length) % Math.max(1, tabs.length);
+		const nextTab = tabs[nextIndex];
+		if (!nextTab) return;
+		setActiveTab(nextTab.id);
+		focusTabAtIndex(nextIndex);
+	};
 
 	return (
 		<header class="sticky top-0 z-10 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200/70 dark:border-gray-800/70 bg-white/75 dark:bg-gray-900/55 backdrop-blur">
@@ -49,13 +63,50 @@ export function SettingsHeader(props: SettingsHeaderProps) {
 				</div>
 
 				{/* Tab Navigation */}
-				<div class="flex gap-1 overflow-x-auto -mx-1 px-1 py-1 lg:hidden">
+				<div
+					class="flex gap-1 overflow-x-auto -mx-1 px-1 py-1 lg:hidden"
+					role="tablist"
+					aria-label="Settings sections"
+					aria-orientation="horizontal"
+				>
 					<For each={tabs}>
-						{(tab) => (
+						{(tab, index) => (
 							<button
 								type="button"
+								id={`settings-tab-${tab.id}`}
+								role="tab"
+								aria-selected={activeTab() === tab.id}
+								aria-controls={`settings-panel-${tab.id}`}
+								tabIndex={activeTab() === tab.id ? 0 : -1}
+								ref={(el) => {
+									tabRefs[index()] = el;
+								}}
 								onClick={() => setActiveTab(tab.id)}
-								class="px-3 py-1.5 text-sm font-medium rounded-xl transition-all whitespace-nowrap flex-none"
+								onKeyDown={(event) => {
+									if (event.key === "ArrowLeft") {
+										event.preventDefault();
+										moveFocus(index(), -1);
+										return;
+									}
+									if (event.key === "ArrowRight") {
+										event.preventDefault();
+										moveFocus(index(), 1);
+										return;
+									}
+									if (event.key === "Home") {
+										event.preventDefault();
+										setActiveTab(tabs[0]!.id);
+										focusTabAtIndex(0);
+										return;
+									}
+									if (event.key === "End") {
+										event.preventDefault();
+										const lastIndex = tabs.length - 1;
+										setActiveTab(tabs[lastIndex]!.id);
+										focusTabAtIndex(lastIndex);
+									}
+								}}
+								class="px-3 py-1.5 text-sm font-medium rounded-xl transition-all whitespace-nowrap flex-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900"
 								classList={{
 									"bg-brand-100/80 dark:bg-brand-900/25 text-brand-700 dark:text-brand-300 shadow-sm":
 										activeTab() === tab.id,
