@@ -108,8 +108,8 @@ export function AgentConfigResultModal(props: AgentConfigResultModalProps) {
 									</Show>
 
 									<Show when={result().result.instructions}>
-										<div class="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-											<p class="text-sm text-blue-700 dark:text-blue-300">
+										<div class="p-3 rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800">
+											<p class="text-sm text-brand-700 dark:text-brand-300">
 												{result().result.instructions}
 											</p>
 										</div>

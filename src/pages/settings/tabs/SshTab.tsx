@@ -117,7 +117,9 @@ export const SshTab = (props: SshTabProps) => (
 									onChange={(val) => props.onToggle(ssh.id, val)}
 								/>
 								<button
-									class="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+									type="button"
+									aria-label="Edit SSH connection"
+									class="p-2 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900"
 									title="Edit Connection"
 									onClick={() => props.onEdit(ssh)}
 								>
@@ -137,7 +139,9 @@ export const SshTab = (props: SshTabProps) => (
 									</svg>
 								</button>
 								<button
-									class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+									type="button"
+									aria-label="Delete SSH connection"
+									class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900"
 									title="Delete Connection"
 									onClick={() => props.onDelete(ssh.id)}
 								>
@@ -189,7 +193,7 @@ export const SshTab = (props: SshTabProps) => (
 						Host / IP
 					</label>
 					<input
-						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all"
 						placeholder="e.g. 192.168.1.1 or vps.example.com"
 						value={props.sshHost()}
 						onInput={(e) => props.setSshHost(e.currentTarget.value)}
@@ -198,7 +202,7 @@ export const SshTab = (props: SshTabProps) => (
 				<div class="space-y-1">
 					<label class="text-xs font-medium text-gray-500 uppercase">Port</label>
 					<input
-						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all"
 						placeholder="22"
 						type="number"
 						value={props.sshPort()}
@@ -210,7 +214,7 @@ export const SshTab = (props: SshTabProps) => (
 						Username
 					</label>
 					<input
-						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all"
 						placeholder="root"
 						value={props.sshUser()}
 						onInput={(e) => props.setSshUser(e.currentTarget.value)}
@@ -239,7 +243,7 @@ export const SshTab = (props: SshTabProps) => (
 					</label>
 					<div class="flex gap-2">
 						<input
-							class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+							class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all"
 							placeholder="/path/to/private_key"
 							value={props.sshKey()}
 							onInput={(e) => props.setSshKey(e.currentTarget.value)}
@@ -257,7 +261,7 @@ export const SshTab = (props: SshTabProps) => (
 						Remote Port (VPS)
 					</label>
 					<input
-						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all"
 						placeholder="8317"
 						type="number"
 						value={props.sshRemote()}
@@ -270,7 +274,7 @@ export const SshTab = (props: SshTabProps) => (
 						Local Port (This App)
 					</label>
 					<input
-						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none transition-all"
 						placeholder="8317"
 						type="number"
 						value={props.sshLocal()}

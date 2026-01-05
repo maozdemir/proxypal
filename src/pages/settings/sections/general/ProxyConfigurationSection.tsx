@@ -113,8 +113,9 @@ export function ProxyConfigurationSection(props: ProxyConfigurationSectionProps)
 						/>
 						<button
 							type="button"
+							aria-label={showProxyApiKey() ? "Hide proxy API key" : "Show proxy API key"}
 							onClick={() => setShowProxyApiKey(!showProxyApiKey())}
-							class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+							class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900 rounded"
 						>
 							{showProxyApiKey() ? (
 								<svg
@@ -180,8 +181,9 @@ export function ProxyConfigurationSection(props: ProxyConfigurationSectionProps)
 						/>
 						<button
 							type="button"
+							aria-label={showManagementKey() ? "Hide management API key" : "Show management API key"}
 							onClick={() => setShowManagementKey(!showManagementKey())}
-							class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+							class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900 rounded"
 						>
 							{showManagementKey() ? (
 								<svg

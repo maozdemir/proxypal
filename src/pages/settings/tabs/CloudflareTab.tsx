@@ -75,7 +75,9 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 										{status()?.message || (cf.enabled ? "Enabled" : "Disabled")}
 									</p>
 									<Show when={status()?.url}>
-										<p class="text-xs text-blue-500 mt-1">{status()?.url}</p>
+											<p class="text-xs text-brand-600 dark:text-brand-400 mt-1">
+												{status()?.url}
+											</p>
 									</Show>
 								</div>
 							</div>
@@ -86,8 +88,9 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 								/>
 								<button
 									type="button"
+									aria-label="Edit Cloudflare tunnel"
 									onClick={() => props.onEdit(cf)}
-									class="p-2 text-gray-400 hover:text-blue-500 transition-colors"
+									class="p-2 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900 rounded"
 									title="Edit"
 								>
 									<svg
@@ -106,8 +109,9 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 								</button>
 								<button
 									type="button"
+									aria-label="Delete Cloudflare tunnel"
 									onClick={() => props.onDelete(cf.id)}
-									class="p-2 text-gray-400 hover:text-red-500 transition-colors"
+									class="p-2 text-gray-400 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900 rounded"
 									title="Delete"
 								>
 									<svg
@@ -132,15 +136,16 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 		</For>
 
 		<Show when={props.cfAdding()}>
-			<div class="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 space-y-4">
+			<div class="p-4 rounded-xl bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 space-y-4">
 				<div class="flex items-center justify-between">
-					<h3 class="font-medium text-blue-900 dark:text-blue-100">
+					<h3 class="font-medium text-brand-900 dark:text-brand-100">
 						{props.cfId() ? "Edit Tunnel" : "New Tunnel"}
 					</h3>
 					<button
 						type="button"
+						aria-label="Close tunnel editor"
 						onClick={() => props.setCfAdding(false)}
-						class="text-gray-400 hover:text-gray-600"
+						class="text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-900 rounded"
 					>
 						<svg
 							class="w-5 h-5"
@@ -161,7 +166,7 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 					<div class="space-y-1">
 						<label class="text-xs font-medium text-gray-500 uppercase">Name</label>
 						<input
-							class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+							class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none"
 							placeholder="My Tunnel"
 							value={props.cfName()}
 							onInput={(e) => props.setCfName(e.currentTarget.value)}
@@ -172,7 +177,7 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 							Local Port (Reference)
 						</label>
 						<input
-							class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+							class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-brand-500 outline-none"
 							placeholder="8317"
 							type="number"
 							value={props.cfLocalPort()}
@@ -190,7 +195,7 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 						Tunnel Token
 					</label>
 					<input
-						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+						class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-mono focus:ring-2 focus:ring-brand-500 outline-none"
 						placeholder="eyJ..."
 						type="password"
 						value={props.cfToken()}
@@ -224,7 +229,7 @@ export const CloudflareTab = (props: CloudflareTabProps) => (
 						href="https://one.dash.cloudflare.com/"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="text-blue-500 hover:underline"
+						class="text-brand-600 dark:text-brand-400 hover:underline"
 					>
 						Cloudflare Zero Trust Dashboard
 					</a>{" "}

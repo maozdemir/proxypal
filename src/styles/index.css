@@ -271,12 +271,36 @@ body,
     text-shadow: none;
   }
   50% {
-    text-shadow: 0 0 8px rgba(59, 130, 246, 0.3); /* blue-500 */
+    text-shadow: 0 0 8px rgba(59, 130, 246, 0.3); /* brand-500 */
   }
 }
 
 .animate-number-glow {
   animation: number-glow 0.5s ease-out;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-in,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-slide-up,
+  .animate-slide-down,
+  .animate-bounce-in,
+  .animate-gentle-pulse,
+  .animate-spin,
+  .animate-shimmer,
+  .animate-number-glow {
+    animation: none !important;
+  }
+
+  .animate-stagger > * {
+    animation: none !important;
+  }
+
+  .hover-lift {
+    transition: none !important;
+  }
 }
 
 /* Success checkmark animation */

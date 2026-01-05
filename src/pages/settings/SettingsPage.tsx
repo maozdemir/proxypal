@@ -1029,208 +1029,255 @@ export function SettingsPage() {
 							setActiveTab={setActiveTab}
 						/>
 
-						<div class="space-y-4 sm:space-y-6 animate-stagger">
-						<GeneralSettingsSection
-							activeTab={activeTab}
-							config={config}
-							handleConfigChange={handleConfigChange}
-							closeToTray={closeToTray}
-							handleCloseToTrayChange={handleCloseToTrayChange}
-							savingCloseToTray={savingCloseToTray}
-						/>
-						<ProxyConfigurationSection
-							activeTab={activeTab}
-							config={config}
-							handleConfigChange={handleConfigChange}
-							showProxyApiKey={showProxyApiKey}
-							setShowProxyApiKey={setShowProxyApiKey}
-							showManagementKey={showManagementKey}
-							setShowManagementKey={setShowManagementKey}
-							proxyRunning={() => appStore.proxyStatus().running}
-							maxRetryInterval={maxRetryInterval}
-							savingMaxRetryInterval={savingMaxRetryInterval}
-							handleMaxRetryIntervalChange={handleMaxRetryIntervalChange}
-								logSize={logSize}
-								savingLogSize={savingLogSize}
-								handleLogSizeChange={handleLogSizeChange}
-						/>
-						<ThinkingBudgetSection
-							activeTab={activeTab}
-							thinkingBudgetMode={thinkingBudgetMode}
-							setThinkingBudgetMode={setThinkingBudgetMode}
-							thinkingBudgetCustom={thinkingBudgetCustom}
-							setThinkingBudgetCustom={setThinkingBudgetCustom}
-							saveThinkingBudget={saveThinkingBudget}
-							savingThinkingBudget={savingThinkingBudget}
-						/>
-						<ReasoningEffortSection
-							activeTab={activeTab}
-							reasoningEffortLevel={reasoningEffortLevel}
-							setReasoningEffortLevel={setReasoningEffortLevel}
-							saveReasoningEffort={saveReasoningEffort}
-							savingReasoningEffort={savingReasoningEffort}
-						/>
-						<ClaudeCodeSettingsSection
-							activeTab={activeTab}
-							claudeCodeSettings={claudeCodeSettings}
-							getAvailableTargetModels={getAvailableTargetModels}
-							handleClaudeCodeSettingChange={handleClaudeCodeSettingChange}
-							handleClaudeCodeFallbackChange={handleClaudeCodeFallbackChange}
-						/>
-						<AmpCliIntegrationSection
-							activeTab={activeTab}
-							config={config}
-							handleConfigChange={handleConfigChange}
-							proxyRunning={() => appStore.proxyStatus().running}
-							savingForceModelMappings={savingForceModelMappings}
-							forceModelMappings={forceModelMappings}
-							handleForceModelMappingsChange={handleForceModelMappingsChange}
-							getMappingForSlot={getMappingForSlot}
-							updateSlotMapping={updateSlotMapping}
-							getAvailableTargetModels={getAvailableTargetModels}
-							getCustomMappings={getCustomMappings}
-							updateCustomMapping={updateCustomMapping}
-							removeCustomMapping={removeCustomMapping}
-							newMappingFrom={newMappingFrom}
-							setNewMappingFrom={setNewMappingFrom}
-							newMappingTo={newMappingTo}
-							setNewMappingTo={setNewMappingTo}
-							addCustomMapping={addCustomMapping}
-							deleteOpenAIProvider={deleteOpenAIProvider}
-							openProviderModal={openProviderModal}
-							providerModalOpen={providerModalOpen}
-							closeProviderModal={closeProviderModal}
-							editingProviderId={editingProviderId}
-							providerName={providerName}
-							setProviderName={setProviderName}
-							providerBaseUrl={providerBaseUrl}
-							setProviderBaseUrl={setProviderBaseUrl}
-							providerApiKey={providerApiKey}
-							setProviderApiKey={setProviderApiKey}
-							providerModels={providerModels}
-							newModelName={newModelName}
-							setNewModelName={setNewModelName}
-							newModelAlias={newModelAlias}
-							setNewModelAlias={setNewModelAlias}
-							addProviderModel={addProviderModel}
-							removeProviderModel={removeProviderModel}
-							testingProvider={testingProvider}
-							providerTestResult={providerTestResult}
-							testProviderConnection={testProviderConnection}
-							saveOpenAIProvider={saveOpenAIProvider}
-						/>
+						<div>
+							<section
+								id="settings-panel-general"
+								role="tabpanel"
+								aria-labelledby="settings-tab-general"
+								class="space-y-4 sm:space-y-6 animate-stagger"
+								classList={{ hidden: activeTab() !== "general" }}
+							>
+								<GeneralSettingsSection
+									activeTab={activeTab}
+									config={config}
+									handleConfigChange={handleConfigChange}
+									closeToTray={closeToTray}
+									handleCloseToTrayChange={handleCloseToTrayChange}
+									savingCloseToTray={savingCloseToTray}
+								/>
+								<ProxyConfigurationSection
+									activeTab={activeTab}
+									config={config}
+									handleConfigChange={handleConfigChange}
+									showProxyApiKey={showProxyApiKey}
+									setShowProxyApiKey={setShowProxyApiKey}
+									showManagementKey={showManagementKey}
+									setShowManagementKey={setShowManagementKey}
+									proxyRunning={() => appStore.proxyStatus().running}
+									maxRetryInterval={maxRetryInterval}
+									savingMaxRetryInterval={savingMaxRetryInterval}
+									handleMaxRetryIntervalChange={handleMaxRetryIntervalChange}
+									logSize={logSize}
+									savingLogSize={savingLogSize}
+									handleLogSizeChange={handleLogSizeChange}
+								/>
+								<ThinkingBudgetSection
+									activeTab={activeTab}
+									thinkingBudgetMode={thinkingBudgetMode}
+									setThinkingBudgetMode={setThinkingBudgetMode}
+									thinkingBudgetCustom={thinkingBudgetCustom}
+									setThinkingBudgetCustom={setThinkingBudgetCustom}
+									saveThinkingBudget={saveThinkingBudget}
+									savingThinkingBudget={savingThinkingBudget}
+								/>
+								<ReasoningEffortSection
+									activeTab={activeTab}
+									reasoningEffortLevel={reasoningEffortLevel}
+									setReasoningEffortLevel={setReasoningEffortLevel}
+									saveReasoningEffort={saveReasoningEffort}
+									savingReasoningEffort={savingReasoningEffort}
+								/>
+								<ClaudeCodeSettingsSection
+									activeTab={activeTab}
+									claudeCodeSettings={claudeCodeSettings}
+									getAvailableTargetModels={getAvailableTargetModels}
+									handleClaudeCodeSettingChange={handleClaudeCodeSettingChange}
+									handleClaudeCodeFallbackChange={handleClaudeCodeFallbackChange}
+								/>
+								<AmpCliIntegrationSection
+									activeTab={activeTab}
+									config={config}
+									handleConfigChange={handleConfigChange}
+									proxyRunning={() => appStore.proxyStatus().running}
+									savingForceModelMappings={savingForceModelMappings}
+									forceModelMappings={forceModelMappings}
+									handleForceModelMappingsChange={handleForceModelMappingsChange}
+									getMappingForSlot={getMappingForSlot}
+									updateSlotMapping={updateSlotMapping}
+									getAvailableTargetModels={getAvailableTargetModels}
+									getCustomMappings={getCustomMappings}
+									updateCustomMapping={updateCustomMapping}
+									removeCustomMapping={removeCustomMapping}
+									newMappingFrom={newMappingFrom}
+									setNewMappingFrom={setNewMappingFrom}
+									newMappingTo={newMappingTo}
+									setNewMappingTo={setNewMappingTo}
+									addCustomMapping={addCustomMapping}
+									deleteOpenAIProvider={deleteOpenAIProvider}
+									openProviderModal={openProviderModal}
+									providerModalOpen={providerModalOpen}
+									closeProviderModal={closeProviderModal}
+									editingProviderId={editingProviderId}
+									providerName={providerName}
+									setProviderName={setProviderName}
+									providerBaseUrl={providerBaseUrl}
+									setProviderBaseUrl={setProviderBaseUrl}
+									providerApiKey={providerApiKey}
+									setProviderApiKey={setProviderApiKey}
+									providerModels={providerModels}
+									newModelName={newModelName}
+									setNewModelName={setNewModelName}
+									newModelAlias={newModelAlias}
+									setNewModelAlias={setNewModelAlias}
+									addProviderModel={addProviderModel}
+									removeProviderModel={removeProviderModel}
+									testingProvider={testingProvider}
+									providerTestResult={providerTestResult}
+									testProviderConnection={testProviderConnection}
+									saveOpenAIProvider={saveOpenAIProvider}
+								/>
+							</section>
 
-						<AdvancedSettingsSection
-							activeTab={activeTab}
-							config={config}
-							handleConfigChange={handleConfigChange}
-							proxyRunning={() => appStore.proxyStatus().running}
-							websocketAuth={websocketAuth}
-							savingWebsocketAuth={savingWebsocketAuth}
-							handleWebsocketAuthChange={handleWebsocketAuthChange}
-							newExcludedProvider={newExcludedProvider}
-							setNewExcludedProvider={setNewExcludedProvider}
-							newExcludedModel={newExcludedModel}
-							setNewExcludedModel={setNewExcludedModel}
-							handleAddExcludedModel={handleAddExcludedModel}
-							handleRemoveExcludedModel={handleRemoveExcludedModel}
-							savingExcludedModels={savingExcludedModels}
-							loadingExcludedModels={loadingExcludedModels}
-							oauthExcludedModels={oauthExcludedModels}
-							getAvailableTargetModels={getAvailableTargetModels}
-						/>
-						<ProvidersTab
-							active={activeTab() === "providers"}
-							copilotDetection={copilotDetection}
-							detectingCopilot={detectingCopilot}
-							onRunCopilotDetection={runCopilotDetection}
-							connectedCount={connectedCount}
-							totalProviders={totalProviders}
-							onManageAccounts={() => setCurrentPage("dashboard")}
-							oauthModelsBySource={oauthModelsBySource}
-						/>
+							<section
+								id="settings-panel-providers"
+								role="tabpanel"
+								aria-labelledby="settings-tab-providers"
+								class="space-y-4 sm:space-y-6 animate-stagger"
+								classList={{ hidden: activeTab() !== "providers" }}
+							>
+								<ProvidersTab
+									active={activeTab() === "providers"}
+									copilotDetection={copilotDetection}
+									detectingCopilot={detectingCopilot}
+									onRunCopilotDetection={runCopilotDetection}
+									connectedCount={connectedCount}
+									totalProviders={totalProviders}
+									onManageAccounts={() => setCurrentPage("dashboard")}
+									oauthModelsBySource={oauthModelsBySource}
+								/>
+							</section>
 
-						<SshTab
-							active={activeTab() === "ssh"}
-							sshConfigs={() => config().sshConfigs || []}
-							sshStatus={appStore.sshStatus}
-							onToggle={handleToggleSsh}
-							onEdit={handleEditSsh}
-							onDelete={handleDeleteSsh}
-							sshId={sshId}
-							sshHost={sshHost}
-							setSshHost={setSshHost}
-							sshPort={sshPort}
-							setSshPort={setSshPort}
-							sshUser={sshUser}
-							setSshUser={setSshUser}
-							sshPass={sshPass}
-							setSshPass={setSshPass}
-							sshKey={sshKey}
-							setSshKey={setSshKey}
-							sshRemote={sshRemote}
-							setSshRemote={setSshRemote}
-							sshLocal={sshLocal}
-							setSshLocal={setSshLocal}
-							sshAdding={sshAdding}
-							onPickKeyFile={handlePickKeyFile}
-							onSave={handleSaveSsh}
-							onCancelEdit={handleCancelEdit}
-						/>
+							<section
+								id="settings-panel-models"
+								role="tabpanel"
+								aria-labelledby="settings-tab-models"
+								class="space-y-4 sm:space-y-6 animate-stagger"
+								classList={{ hidden: activeTab() !== "models" }}
+							>
+								<ModelsTab
+									active={activeTab() === "models"}
+									models={models}
+									agents={agents}
+									configuringAgent={configuringAgent}
+									onConfigureAgent={handleConfigureAgent}
+									proxyRunning={appStore.proxyStatus().running}
+								/>
+							</section>
 
-						<CloudflareTab
-							active={activeTab() === "cloudflare"}
-							cloudflareConfigs={() => config().cloudflareConfigs || []}
-							cloudflareStatus={appStore.cloudflareStatus}
-							onToggle={handleToggleCf}
-							onEdit={handleEditCf}
-							onDelete={handleDeleteCf}
-							onSave={handleSaveCf}
-							cfAdding={cfAdding}
-							setCfAdding={setCfAdding}
-							cfId={cfId}
-							setCfId={setCfId}
-							cfName={cfName}
-							setCfName={setCfName}
-							cfToken={cfToken}
-							setCfToken={setCfToken}
-							cfLocalPort={cfLocalPort}
-							setCfLocalPort={setCfLocalPort}
-						/>
+							<section
+								id="settings-panel-ssh"
+								role="tabpanel"
+								aria-labelledby="settings-tab-ssh"
+								class="space-y-4 sm:space-y-6 animate-stagger"
+								classList={{ hidden: activeTab() !== "ssh" }}
+							>
+								<SshTab
+									active={activeTab() === "ssh"}
+									sshConfigs={() => config().sshConfigs || []}
+									sshStatus={appStore.sshStatus}
+									onToggle={handleToggleSsh}
+									onEdit={handleEditSsh}
+									onDelete={handleDeleteSsh}
+									sshId={sshId}
+									sshHost={sshHost}
+									setSshHost={setSshHost}
+									sshPort={sshPort}
+									setSshPort={setSshPort}
+									sshUser={sshUser}
+									setSshUser={setSshUser}
+									sshPass={sshPass}
+									setSshPass={setSshPass}
+									sshKey={sshKey}
+									setSshKey={setSshKey}
+									sshRemote={sshRemote}
+									setSshRemote={setSshRemote}
+									sshLocal={sshLocal}
+									setSshLocal={setSshLocal}
+									sshAdding={sshAdding}
+									onPickKeyFile={handlePickKeyFile}
+									onSave={handleSaveSsh}
+									onCancelEdit={handleCancelEdit}
+								/>
+							</section>
 
-						<YamlConfigEditorSection
-							activeTab={activeTab}
-							yamlConfigExpanded={yamlConfigExpanded}
-							setYamlConfigExpanded={setYamlConfigExpanded}
-							loadYamlConfig={loadYamlConfig}
-							loadingYaml={loadingYaml}
-							yamlContent={yamlContent}
-							setYamlContent={setYamlContent}
-							saveYamlConfig={saveYamlConfig}
-							savingYaml={savingYaml}
-						/>
-						<AppUpdatesSection
-							activeTab={activeTab}
-							updaterSupport={updaterSupport}
-							checkingForUpdates={checkingForUpdates}
-							installingUpdate={installingUpdate}
-							updateInfo={updateInfo}
-							updateProgress={updateProgress}
-							handleCheckForUpdates={handleCheckForUpdates}
-							handleInstallUpdate={handleInstallUpdate}
-						/>
-						<div class="border-t border-gray-200 dark:border-gray-700 my-6" />
+							<section
+								id="settings-panel-cloudflare"
+								role="tabpanel"
+								aria-labelledby="settings-tab-cloudflare"
+								class="space-y-4 sm:space-y-6 animate-stagger"
+								classList={{ hidden: activeTab() !== "cloudflare" }}
+							>
+								<CloudflareTab
+									active={activeTab() === "cloudflare"}
+									cloudflareConfigs={() => config().cloudflareConfigs || []}
+									cloudflareStatus={appStore.cloudflareStatus}
+									onToggle={handleToggleCf}
+									onEdit={handleEditCf}
+									onDelete={handleDeleteCf}
+									onSave={handleSaveCf}
+									cfAdding={cfAdding}
+									setCfAdding={setCfAdding}
+									cfId={cfId}
+									setCfId={setCfId}
+									cfName={cfName}
+									setCfName={setCfName}
+									cfToken={cfToken}
+									setCfToken={setCfToken}
+									cfLocalPort={cfLocalPort}
+									setCfLocalPort={setCfLocalPort}
+								/>
+							</section>
 
-						<ModelsTab
-							active={activeTab() === "models"}
-							models={models}
-							agents={agents}
-							configuringAgent={configuringAgent}
-							onConfigureAgent={handleConfigureAgent}
-							proxyRunning={appStore.proxyStatus().running}
-						/>
-
-						<AboutSection activeTab={activeTab} appVersion={appVersion} />
+							<section
+								id="settings-panel-advanced"
+								role="tabpanel"
+								aria-labelledby="settings-tab-advanced"
+								class="space-y-4 sm:space-y-6 animate-stagger"
+								classList={{ hidden: activeTab() !== "advanced" }}
+							>
+								<AdvancedSettingsSection
+									activeTab={activeTab}
+									config={config}
+									handleConfigChange={handleConfigChange}
+									proxyRunning={() => appStore.proxyStatus().running}
+									websocketAuth={websocketAuth}
+									savingWebsocketAuth={savingWebsocketAuth}
+									handleWebsocketAuthChange={handleWebsocketAuthChange}
+									newExcludedProvider={newExcludedProvider}
+									setNewExcludedProvider={setNewExcludedProvider}
+									newExcludedModel={newExcludedModel}
+									setNewExcludedModel={setNewExcludedModel}
+									handleAddExcludedModel={handleAddExcludedModel}
+									handleRemoveExcludedModel={handleRemoveExcludedModel}
+									savingExcludedModels={savingExcludedModels}
+									loadingExcludedModels={loadingExcludedModels}
+									oauthExcludedModels={oauthExcludedModels}
+									getAvailableTargetModels={getAvailableTargetModels}
+								/>
+								<YamlConfigEditorSection
+									activeTab={activeTab}
+									yamlConfigExpanded={yamlConfigExpanded}
+									setYamlConfigExpanded={setYamlConfigExpanded}
+									loadYamlConfig={loadYamlConfig}
+									loadingYaml={loadingYaml}
+									yamlContent={yamlContent}
+									setYamlContent={setYamlContent}
+									saveYamlConfig={saveYamlConfig}
+									savingYaml={savingYaml}
+								/>
+								<AppUpdatesSection
+									activeTab={activeTab}
+									updaterSupport={updaterSupport}
+									checkingForUpdates={checkingForUpdates}
+									installingUpdate={installingUpdate}
+									updateInfo={updateInfo}
+									updateProgress={updateProgress}
+									handleCheckForUpdates={handleCheckForUpdates}
+									handleInstallUpdate={handleInstallUpdate}
+								/>
+								<div class="border-t border-gray-200 dark:border-gray-700 my-6" />
+								<AboutSection activeTab={activeTab} appVersion={appVersion} />
+							</section>
 						</div>
 					</div>
 				</div>

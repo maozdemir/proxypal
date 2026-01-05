@@ -60,14 +60,14 @@ export const ProvidersTab = (props: ProvidersTabProps) => (
 
 							<div class="flex items-center gap-2">
 								<span
-									class={`w-2 h-2 rounded-full ${detection().installed ? "bg-green-500" : "bg-blue-500"}`}
+									class={`w-2 h-2 rounded-full ${detection().installed ? "bg-green-500" : "bg-brand-500"}`}
 								/>
 								<span class="font-medium">copilot-api:</span>
 								<span
 									class={
 										detection().installed
 											? "text-green-600 dark:text-green-400"
-											: "text-blue-600 dark:text-blue-400"
+											: "text-brand-600 dark:text-brand-400"
 									}
 								>
 									{detection().installed
@@ -206,7 +206,7 @@ export const ProvidersTab = (props: ProvidersTabProps) => (
 															: source.includes("claude")
 																? "bg-orange-500"
 																: source.includes("gemini")
-																	? "bg-blue-500"
+																	? "bg-brand-500"
 																	: "bg-green-500"
 													}`}
 												/>
