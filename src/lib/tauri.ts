@@ -93,6 +93,7 @@ export interface AmpModelMapping {
 	name: string;
 	alias: string;
 	enabled?: boolean; // Whether this mapping is active
+	fork?: boolean; // Whether to fork requests (send to both original and alias)
 }
 
 // Predefined Amp model slots with friendly names
@@ -1062,6 +1063,15 @@ export async function getMaxRetryInterval(): Promise<number> {
 
 export async function setMaxRetryInterval(value: number): Promise<void> {
 	return invoke("set_max_retry_interval", { value });
+}
+
+// Log Size - controls how many log entries are retained in memory
+export async function getLogSize(): Promise<number> {
+	return invoke("get_log_size");
+}
+
+export async function setLogSize(size: number): Promise<void> {
+	return invoke("set_log_size", { size });
 }
 
 // WebSocket Auth - toggle WebSocket authentication requirement

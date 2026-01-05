@@ -12,6 +12,7 @@ interface ProvidersTabProps {
 	connectedCount: Accessor<number>;
 	totalProviders: Accessor<number>;
 	onManageAccounts: () => void;
+	oauthModelsBySource?: Accessor<Record<string, string[]>>;
 }
 
 export const ProvidersTab = (props: ProvidersTabProps) => (
@@ -175,5 +176,65 @@ export const ProvidersTab = (props: ProvidersTabProps) => (
 				</div>
 			</div>
 		</div>
+
+		<Show when={props.oauthModelsBySource}>
+			{(getOAuthModelsBySource) => (
+				<div class="space-y-4">
+					<h2 class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+						OAuth Model Mappings
+					</h2>
+
+					<div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+						<Show
+							when={Object.keys(getOAuthModelsBySource()()).length > 0}
+							fallback={
+								<p class="text-sm text-gray-500 dark:text-gray-400">
+									No OAuth-sourced models available. Connect an OAuth provider
+									to see models here.
+								</p>
+							}
+						>
+							<div class="space-y-4">
+								<For each={Object.entries(getOAuthModelsBySource()())}>
+									{([source, modelIds]) => (
+										<div>
+											<p class="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2 flex items-center gap-2">
+												<span
+													class={`w-2 h-2 rounded-full ${
+														source.includes("copilot")
+															? "bg-purple-500"
+															: source.includes("claude")
+																? "bg-orange-500"
+																: source.includes("gemini")
+																	? "bg-blue-500"
+																	: "bg-green-500"
+													}`}
+												/>
+												{source
+													.replace(/-/g, " ")
+													.replace(/\b\w/g, (c) => c.toUpperCase())}
+											</p>
+											<div class="flex flex-wrap gap-1.5">
+												<For each={modelIds}>
+													{(modelId) => (
+														<span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+														{modelId}
+													</span>
+													)}
+												</For>
+											</div>
+										</div>
+									)}
+								</For>
+							</div>
+						</Show>
+						<p class="text-xs text-gray-400 dark:text-gray-500 mt-3">
+							These models are available through OAuth-authenticated accounts
+							and are automatically routed by ProxyPal.
+						</p>
+					</div>
+				</div>
+			)}
+		</Show>
 	</div>
 );

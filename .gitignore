@@ -33,6 +33,9 @@ src-tauri/target/
 .opencode/
 .beads/
 
+# bv (beads viewer) local config and caches
+.bv/
+
 # CLIProxyAPI logs (prevent accidental commit)
 src-tauri/logs/
 *.key

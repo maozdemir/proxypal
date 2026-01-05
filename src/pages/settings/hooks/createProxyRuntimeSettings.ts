@@ -5,6 +5,7 @@ import {
 	deleteOAuthExcludedModels,
 	getAvailableModels,
 	getForceModelMappings,
+	getLogSize,
 	getMaxRetryInterval,
 	getOAuthExcludedModels,
 	getReasoningEffortSettings,
@@ -12,6 +13,7 @@ import {
 	getThinkingBudgetTokens,
 	getWebsocketAuth,
 	setForceModelMappings,
+	setLogSize,
 	setMaxRetryInterval,
 	setOAuthExcludedModels,
 	setReasoningEffortSettings,
@@ -30,11 +32,13 @@ export function createProxyRuntimeSettings(proxyRunning: Accessor<boolean>) {
 	);
 
 	const [maxRetryInterval, setMaxRetryIntervalState] = createSignal<number>(0);
+	const [logSize, setLogSizeState] = createSignal<number>(500);
 	const [websocketAuth, setWebsocketAuthState] = createSignal<boolean>(false);
 	const [forceModelMappings, setForceModelMappingsState] =
 		createSignal<boolean>(false);
 	const [savingMaxRetryInterval, setSavingMaxRetryInterval] =
 		createSignal(false);
+	const [savingLogSize, setSavingLogSize] = createSignal(false);
 	const [savingWebsocketAuth, setSavingWebsocketAuth] = createSignal(false);
 	const [savingForceModelMappings, setSavingForceModelMappings] =
 		createSignal(false);
@@ -74,6 +78,13 @@ export function createProxyRuntimeSettings(proxyRunning: Accessor<boolean>) {
 			setMaxRetryIntervalState(interval);
 		} catch (error) {
 			console.error("Failed to fetch max retry interval:", error);
+		}
+
+		try {
+			const size = await getLogSize();
+			setLogSizeState(size);
+		} catch (error) {
+			console.error("Failed to fetch log size:", error);
 		}
 
 		try {
@@ -126,6 +137,19 @@ export function createProxyRuntimeSettings(proxyRunning: Accessor<boolean>) {
 			toastStore.error("Failed to update max retry interval", String(error));
 		} finally {
 			setSavingMaxRetryInterval(false);
+		}
+	};
+
+	const handleLogSizeChange = async (value: number) => {
+		setSavingLogSize(true);
+		try {
+			await setLogSize(value);
+			setLogSizeState(value);
+			toastStore.success("Log buffer size updated");
+		} catch (error) {
+			toastStore.error("Failed to update log size", String(error));
+		} finally {
+			setSavingLogSize(false);
 		}
 	};
 
@@ -263,6 +287,9 @@ export function createProxyRuntimeSettings(proxyRunning: Accessor<boolean>) {
 		savingWebsocketAuth,
 		savingForceModelMappings,
 		handleMaxRetryIntervalChange,
+		logSize,
+		savingLogSize,
+		handleLogSizeChange,
 		handleWebsocketAuthChange,
 		handleForceModelMappingsChange,
 		thinkingBudgetMode,

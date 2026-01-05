@@ -46,6 +46,7 @@ export interface AmpCliIntegrationSectionProps {
 		slotId: string,
 		toModel: string,
 		enabled: boolean,
+		fork?: boolean,
 	) => void | Promise<void>;
 
 	getAvailableTargetModels: () => AvailableTargetModels;
@@ -55,6 +56,7 @@ export interface AmpCliIntegrationSectionProps {
 		fromModel: string,
 		newToModel: string,
 		enabled: boolean,
+		fork?: boolean,
 	) => void | Promise<void>;
 	removeCustomMapping: (fromModel: string) => void | Promise<void>;
 
@@ -248,6 +250,7 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 									const mapping = () => getMappingForSlot(slot.id);
 									const isEnabled = () => !!mapping();
 									const currentTarget = () => mapping()?.alias || "";
+									const currentFork = () => mapping()?.fork ?? false;
 
 									return (
 										<div class="p-3 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -270,7 +273,8 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 																updateSlotMapping(
 																	slot.id,
 																	defaultTarget,
-																	true,
+																		true,
+																		currentFork(),
 																);
 															} else {
 																updateSlotMapping(slot.id, "", false);
@@ -301,19 +305,20 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 														const { customModels, builtInModels } =
 															getAvailableTargetModels();
 														return (
-															<select
-																value={currentTarget()}
-																onChange={(e) => {
-																	const newTarget = e.currentTarget.value;
-																	updateSlotMapping(slot.id, newTarget, true);
-																}}
-																disabled={!isEnabled()}
-																class={`flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100 ${
-																	!isEnabled()
-																		? "opacity-50 cursor-not-allowed"
-																		: ""
-																}`}
-															>
+																<>
+																	<select
+																		value={currentTarget()}
+																		onChange={(e) => {
+																			const newTarget = e.currentTarget.value;
+																			updateSlotMapping(slot.id, newTarget, true);
+																		}}
+																		disabled={!isEnabled()}
+																		class={`flex-1 min-w-0 px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-gray-100 [&>optgroup]:bg-white [&>optgroup]:dark:bg-gray-900 [&>optgroup]:text-gray-900 [&>optgroup]:dark:text-gray-100 ${
+																		!isEnabled()
+																			? "opacity-50 cursor-not-allowed"
+																			: ""
+																	}`}
+																	>
 																<option value="">Select target...</option>
 																<Show when={customModels.length > 0}>
 																	<optgroup label="Custom Provider">
@@ -385,6 +390,29 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 																	</optgroup>
 																</Show>
 															</select>
+
+																	<Show when={isEnabled()}>
+																		<button
+																			type="button"
+																			onClick={() => {
+																				updateSlotMapping(
+																					slot.id,
+																					currentTarget(),
+																					true,
+																					!currentFork(),
+																				);
+																		}}
+																		class={`shrink-0 px-2 py-1 text-xs rounded border transition-colors ${
+																			currentFork()
+																				? "bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
+																				: "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+																		}`}
+																		title="Fork: Send request to both original and mapped model"
+																	>
+																		Fork
+																	</button>
+																</Show>
+																</>
 														);
 													})()}
 												</div>
@@ -418,7 +446,8 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 															updateCustomMapping(
 																mapping.name,
 																mapping.alias,
-																e.currentTarget.checked,
+																			e.currentTarget.checked,
+																		mapping.fork,
 															);
 														}}
 														class="w-4 h-4 text-brand-500 bg-gray-100 border-gray-300 rounded focus:ring-brand-500 dark:focus:ring-brand-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
@@ -449,6 +478,7 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 																mapping.name,
 																e.currentTarget.value,
 																mapping.enabled !== false,
+																			mapping.fork,
 															);
 														}}
 														disabled={mapping.enabled === false}
@@ -521,6 +551,28 @@ export function AmpCliIntegrationSection(props: AmpCliIntegrationSectionProps) {
 															</optgroup>
 														</Show>
 													</select>
+
+																<Show when={mapping.enabled !== false}>
+																	<button
+																		type="button"
+																		onClick={() => {
+																			updateCustomMapping(
+																				mapping.name,
+																				mapping.alias,
+																				mapping.enabled !== false,
+																				!mapping.fork,
+																			);
+																	}}
+																	class={`shrink-0 px-2 py-1 text-xs rounded border transition-colors ${
+																		mapping.fork
+																			? "bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
+																			: "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+																	}`}
+																	title="Fork: Send request to both original and mapped model"
+																>
+																	Fork
+																</button>
+															</Show>
 
 													{/* Delete button */}
 													<button

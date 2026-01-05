@@ -21,6 +21,9 @@ export interface ProxyConfigurationSectionProps {
 	maxRetryInterval: Accessor<number>;
 	savingMaxRetryInterval: Accessor<boolean>;
 	handleMaxRetryIntervalChange: (value: number) => void | Promise<void>;
+	logSize: Accessor<number>;
+	savingLogSize: Accessor<boolean>;
+	handleLogSizeChange: (value: number) => void | Promise<void>;
 }
 
 export function ProxyConfigurationSection(props: ProxyConfigurationSectionProps) {
@@ -36,6 +39,9 @@ export function ProxyConfigurationSection(props: ProxyConfigurationSectionProps)
 		maxRetryInterval,
 		savingMaxRetryInterval,
 		handleMaxRetryIntervalChange,
+		logSize,
+		savingLogSize,
+		handleLogSizeChange,
 	} = props;
 
 	return (
@@ -316,6 +322,53 @@ export function ProxyConfigurationSection(props: ProxyConfigurationSectionProps)
 						<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
 							Maximum wait time between retries in seconds (0 = no limit). Updates
 							live without restart.
+						</p>
+					</label>
+
+					<div class="border-t border-gray-200 dark:border-gray-700" />
+
+					<label class="block">
+						<span class="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+							Log Buffer Size
+							<Show when={savingLogSize()}>
+								<svg
+									class="w-4 h-4 animate-spin text-brand-500"
+									fill="none"
+									viewBox="0 0 24 24"
+								>
+									<circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+									/>
+									<path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									/>
+								</svg>
+							</Show>
+						</span>
+						<input
+							type="number"
+							value={logSize()}
+							onInput={(e) => {
+								const val = Math.max(
+									100,
+									parseInt(e.currentTarget.value) || 500,
+								);
+								handleLogSizeChange(val);
+							}}
+							disabled={savingLogSize()}
+							class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-smooth disabled:opacity-50"
+							min="100"
+						/>
+						<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+							How many log entries are retained in memory. Updates live without
+							restart.
 						</p>
 					</label>
 				</Show>

@@ -72,7 +72,14 @@ import { AboutSection } from "./sections/AboutSection";
 import type { SettingsTab } from "./types";
 
 export function SettingsPage() {
-	const { config, setConfig, setCurrentPage, authStatus } = appStore;
+	const {
+		config,
+		setConfig,
+		setCurrentPage,
+		authStatus,
+		settingsTab,
+		setSettingsTab,
+	} = appStore;
 	const [saving, setSaving] = createSignal(false);
 	const [activeTab, setActiveTab] = createSignal<SettingsTab>("general");
 	const [appVersion, setAppVersion] = createSignal("0.0.0");
@@ -86,9 +93,51 @@ export function SettingsPage() {
 	];
 	const [models, setModels] = createSignal<AvailableModel[]>([]);
 	const [agents, setAgents] = createSignal<AgentStatus[]>([]);
+
+	// OAuth models grouped by source provider
+	const oauthModelsBySource = createMemo(() => {
+		const oauthSources = [
+			"oauth",
+			"copilot",
+			"claude-oauth",
+			"gemini-oauth",
+		];
+		const oauthModels = models().filter((model) =>
+			oauthSources.some((source) =>
+				model.source?.toLowerCase().includes(source.toLowerCase()),
+			),
+		);
+
+		const grouped: Record<string, string[]> = {};
+		for (const model of oauthModels) {
+			const source = model.source || "unknown";
+			if (!grouped[source]) {
+				grouped[source] = [];
+			}
+			grouped[source].push(model.id);
+		}
+		return grouped;
+	});
 	const [configuringAgent, setConfiguringAgent] = createSignal<string | null>(
 		null,
 	);
+
+	// Handle navigation from other components (e.g., CopilotCard)
+	createEffect(() => {
+		const tab = settingsTab();
+		if (
+			tab &&
+			(tab === "general" ||
+				tab === "providers" ||
+				tab === "models" ||
+				tab === "advanced" ||
+				tab === "ssh" ||
+				tab === "cloudflare")
+		) {
+			setActiveTab(tab);
+			setSettingsTab(null);
+		}
+	});
 
 	// Fetch app version on mount
 	onMount(async () => {
@@ -199,12 +248,15 @@ export function SettingsPage() {
 	const {
 		availableModels,
 		maxRetryInterval,
+		logSize,
 		websocketAuth,
 		forceModelMappings,
 		savingMaxRetryInterval,
+		savingLogSize,
 		savingWebsocketAuth,
 		savingForceModelMappings,
 		handleMaxRetryIntervalChange,
+		handleLogSizeChange,
 		handleWebsocketAuthChange,
 		handleForceModelMappingsChange,
 		thinkingBudgetMode,
@@ -606,11 +658,15 @@ export function SettingsPage() {
 		slotId: string,
 		toModel: string,
 		enabled: boolean,
+		fork?: boolean,
 	) => {
 		const slot = AMP_MODEL_SLOTS.find((s) => s.id === slotId);
 		if (!slot) return;
 
 		const currentMappings = config().ampModelMappings || [];
+		const existingMapping = currentMappings.find(
+			(m) => m.name === slot.fromModel,
+		);
 		// Remove existing mapping for this slot
 		const filteredMappings = currentMappings.filter(
 			(m) => m.name !== slot.fromModel,
@@ -621,7 +677,12 @@ export function SettingsPage() {
 		if (enabled && toModel) {
 			newMappings = [
 				...filteredMappings,
-				{ name: slot.fromModel, alias: toModel, enabled: true },
+				{
+					name: slot.fromModel,
+					alias: toModel,
+					enabled: true,
+					fork: fork ?? existingMapping?.fork ?? false,
+				},
 			];
 		} else {
 			newMappings = filteredMappings;
@@ -633,6 +694,11 @@ export function SettingsPage() {
 		setSaving(true);
 		try {
 			await saveConfig(newConfig);
+			if (appStore.proxyStatus().running) {
+				await stopProxy();
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				await startProxy();
+			}
 			toastStore.success("Model mapping updated");
 		} catch (error) {
 			console.error("Failed to save config:", error);
@@ -715,10 +781,18 @@ export function SettingsPage() {
 		fromModel: string,
 		newToModel: string,
 		enabled: boolean,
+		fork?: boolean,
 	) => {
 		const currentMappings = config().ampModelMappings || [];
 		const newMappings = currentMappings.map((m) =>
-			m.name === fromModel ? { ...m, to: newToModel, enabled } : m,
+			m.name === fromModel
+				? {
+					...m,
+					alias: newToModel,
+					enabled,
+					fork: fork ?? m.fork ?? false,
+				}
+				: m,
 		);
 
 		const newConfig = { ...config(), ampModelMappings: newMappings };
@@ -727,6 +801,11 @@ export function SettingsPage() {
 		setSaving(true);
 		try {
 			await saveConfig(newConfig);
+			if (appStore.proxyStatus().running) {
+				await stopProxy();
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				await startProxy();
+			}
 			toastStore.success("Mapping updated");
 		} catch (error) {
 			console.error("Failed to save config:", error);
@@ -966,6 +1045,9 @@ export function SettingsPage() {
 							maxRetryInterval={maxRetryInterval}
 							savingMaxRetryInterval={savingMaxRetryInterval}
 							handleMaxRetryIntervalChange={handleMaxRetryIntervalChange}
+								logSize={logSize}
+								savingLogSize={savingLogSize}
+								handleLogSizeChange={handleLogSizeChange}
 						/>
 						<ThinkingBudgetSection
 							activeTab={activeTab}
@@ -1060,6 +1142,7 @@ export function SettingsPage() {
 							connectedCount={connectedCount}
 							totalProviders={totalProviders}
 							onManageAccounts={() => setCurrentPage("dashboard")}
+							oauthModelsBySource={oauthModelsBySource}
 						/>
 
 						<SshTab
