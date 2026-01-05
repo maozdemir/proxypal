@@ -7,11 +7,18 @@ BINARY_NAME="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARIES_DIR="$SCRIPT_DIR/../binaries"
 
-# Use patched fork until upstream merges fixes (#730, #731, #732)
-CLIPROXYAPI_REPO="${CLIPROXYAPI_REPO:-router-for-me/CLIProxyAPI}"
+# Download releases from GitHub
+CLIPROXYAPI_REPO="${CLIPROXYAPI_REPO:-maozdemir/CLIProxyAPI}"
+CLIPROXYAPI_API_URL="${CLIPROXYAPI_API_URL:-https://api.github.com}"
+
+TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 
 # Get latest version from GitHub API
-VERSION=$(curl -s "https://api.github.com/repos/${CLIPROXYAPI_REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+if [ -n "$TOKEN" ]; then
+	VERSION=$(curl -s -H "Authorization: Bearer ${TOKEN}" "${CLIPROXYAPI_API_URL}/repos/${CLIPROXYAPI_REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+else
+	VERSION=$(curl -s "${CLIPROXYAPI_API_URL}/repos/${CLIPROXYAPI_REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+fi
 if [ -z "$VERSION" ]; then
 	echo "Error: Could not fetch latest version from ${CLIPROXYAPI_REPO}"
 	exit 1
@@ -83,6 +90,11 @@ if [ -n "$BINARY_NAME" ]; then
 		chmod +x "$BINARIES_DIR/$BINARY_NAME"
 	elif [ -f "CLIProxyAPI.exe" ]; then
 		cp "CLIProxyAPI.exe" "$BINARIES_DIR/$BINARY_NAME"
+	elif [ -f "cli-proxy-api.exe" ]; then
+		cp "cli-proxy-api.exe" "$BINARIES_DIR/$BINARY_NAME"
+	elif [ -f "cli-proxy-api" ]; then
+		cp "cli-proxy-api" "$BINARIES_DIR/$BINARY_NAME"
+		chmod +x "$BINARIES_DIR/$BINARY_NAME"
 	else
 		echo "Binary not found in archive"
 		ls -la
@@ -97,8 +109,6 @@ else
 		"cliproxyapi-x86_64-apple-darwin" \
 		"cliproxyapi-x86_64-unknown-linux-gnu" \
 		"cliproxyapi-x86_64-pc-windows-msvc.exe"; do
-		if [ ! -f "$BINARIES_DIR/$target" ]; then
-			"$0" "$target" || echo "Warning: Failed to download $target"
-		fi
+		"$0" "$target" || echo "Warning: Failed to download $target"
 	done
 fi

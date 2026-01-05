@@ -40,3 +40,9 @@ src-tauri/logs/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Keep newly-generated docs out of git by default
+docs/*
+
+# This repo uses pnpm (avoid accidentally committing npm lockfile)
+package-lock.json

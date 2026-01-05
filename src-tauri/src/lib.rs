@@ -38,6 +38,65 @@ use tauri_plugin_shell::ShellExt;
 fn get_management_key() -> String {
     load_config().management_key
 }
+
+fn read_claude_code_fallbacks() -> (Vec<String>, Vec<String>, Vec<String>) {
+    let home = match dirs::home_dir() {
+        Some(path) => path,
+        None => return (Vec::new(), Vec::new(), Vec::new()),
+    };
+    let config_path = home.join(".claude").join("settings.json");
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(data) => data,
+        Err(_) => return (Vec::new(), Vec::new(), Vec::new()),
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(value) => value,
+        Err(_) => return (Vec::new(), Vec::new(), Vec::new()),
+    };
+    let env = json.get("env").and_then(|e| e.as_object());
+
+    let parse_list = |key: &str| -> Vec<String> {
+        env.and_then(|e| e.get(key))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default()
+    };
+
+    (
+        parse_list("ANTHROPIC_FALLBACK_HAIKU_MODELS"),
+        parse_list("ANTHROPIC_FALLBACK_SONNET_MODELS"),
+        parse_list("ANTHROPIC_FALLBACK_OPUS_MODELS"),
+    )
+}
+
+fn build_claude_code_fallback_mappings() -> Vec<(String, String)> {
+    let (haiku_fallback, sonnet_fallback, opus_fallback) = read_claude_code_fallbacks();
+    let mut mappings = Vec::new();
+
+    let build_chain = |chain: Vec<String>, mappings: &mut Vec<(String, String)>| {
+        let filtered: Vec<String> = chain
+            .into_iter()
+            .map(|entry| entry.trim().to_string())
+            .filter(|entry| !entry.is_empty())
+            .collect();
+
+        for pair in filtered.windows(2) {
+            if let [from, to] = pair {
+                mappings.push((from.clone(), to.clone()));
+            }
+        }
+    };
+
+    build_chain(haiku_fallback, &mut mappings);
+    build_chain(sonnet_fallback, &mut mappings);
+    build_chain(opus_fallback, &mut mappings);
+
+    mappings
+}
 use regex::Regex;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 
@@ -688,8 +747,11 @@ async fn start_proxy(
     let enabled_mappings: Vec<_> = config.amp_model_mappings.iter()
         .filter(|m| m.enabled)
         .collect();
-    
-    let amp_model_mappings_section = if enabled_mappings.is_empty() {
+
+    let fallback_mappings = build_claude_code_fallback_mappings();
+    let has_any_mappings = !enabled_mappings.is_empty() || !fallback_mappings.is_empty();
+
+    let amp_model_mappings_section = if !has_any_mappings {
         "  # model-mappings:  # Optional: map Amp model requests to different models\n  #   - from: claude-opus-4-5-20251101\n  #     to: your-preferred-model".to_string()
     } else {
         let mut mappings = String::from("  model-mappings:");
@@ -699,8 +761,13 @@ async fn start_proxy(
                 mappings.push_str("\n      fork: true");
             }
         }
+        for (from, to) in &fallback_mappings {
+            mappings.push_str(&format!("\n    - from: {}\n      to: {}", from, to));
+        }
         mappings
     };
+
+    let should_force_model_mappings = config.force_model_mappings || !fallback_mappings.is_empty();
     
     // Build openai-compatibility section combining custom providers and copilot
     // This defines OpenAI-compatible providers with custom base URLs and model aliases
@@ -1015,7 +1082,7 @@ ws-auth: {}
         payload_section,
         amp_api_key_line,
         amp_model_mappings_section,
-        config.force_model_mappings,
+        should_force_model_mappings,
         config.request_logging,
         config.commercial_mode,
         config.ws_auth
@@ -1101,9 +1168,15 @@ ws-auth: {}
     let _ = client
         .put(&force_mappings_url)
         .header("X-Management-Key", &get_management_key())
-        .json(&serde_json::json!({"value": config.force_model_mappings}))
+        .json(&serde_json::json!({"value": should_force_model_mappings}))
         .send()
         .await;
+
+    if should_force_model_mappings != config.force_model_mappings {
+        let mut config_to_save = config.clone();
+        config_to_save.force_model_mappings = should_force_model_mappings;
+        let _ = save_config_to_file(&config_to_save);
+    }
     
     // Sync max retry interval to CLIProxyAPI
     let max_retry_url = format!("http://127.0.0.1:{}/v0/management/max-retry-interval", port);
@@ -4556,7 +4629,10 @@ async fn configure_cli_agent(state: State<'_, AppState>, agent_id: String, model
                 "ANTHROPIC_AUTH_TOKEN": "proxypal-local",
                 "ANTHROPIC_DEFAULT_OPUS_MODEL": opus_model,
                 "ANTHROPIC_DEFAULT_SONNET_MODEL": sonnet_model,
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model,
+                "ANTHROPIC_FALLBACK_OPUS_MODELS": [],
+                "ANTHROPIC_FALLBACK_SONNET_MODELS": [],
+                "ANTHROPIC_FALLBACK_HAIKU_MODELS": []
             });
             
             // If config exists, merge with existing (preserve other settings)
@@ -4572,6 +4648,12 @@ async fn configure_cli_agent(state: State<'_, AppState>, agent_id: String, model
                                 obj.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), env_config["ANTHROPIC_DEFAULT_OPUS_MODEL"].clone());
                                 obj.insert("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), env_config["ANTHROPIC_DEFAULT_SONNET_MODEL"].clone());
                                 obj.insert("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), env_config["ANTHROPIC_DEFAULT_HAIKU_MODEL"].clone());
+                                obj.entry("ANTHROPIC_FALLBACK_OPUS_MODELS".to_string())
+                                    .or_insert_with(|| env_config["ANTHROPIC_FALLBACK_OPUS_MODELS"].clone());
+                                obj.entry("ANTHROPIC_FALLBACK_SONNET_MODELS".to_string())
+                                    .or_insert_with(|| env_config["ANTHROPIC_FALLBACK_SONNET_MODELS"].clone());
+                                obj.entry("ANTHROPIC_FALLBACK_HAIKU_MODELS".to_string())
+                                    .or_insert_with(|| env_config["ANTHROPIC_FALLBACK_HAIKU_MODELS"].clone());
                             }
                         } else {
                             existing_json["env"] = env_config;
@@ -5742,6 +5824,9 @@ async fn get_claude_code_settings() -> Result<crate::types::agents::ClaudeCodeSe
             haiku_model: None,
             opus_model: None,
             sonnet_model: None,
+            haiku_fallback: Vec::new(),
+            sonnet_fallback: Vec::new(),
+            opus_fallback: Vec::new(),
             base_url: None,
             auth_token: None,
         });
@@ -5756,6 +5841,33 @@ async fn get_claude_code_settings() -> Result<crate::types::agents::ClaudeCodeSe
         haiku_model: env.and_then(|e| e.get("ANTHROPIC_DEFAULT_HAIKU_MODEL")).and_then(|v| v.as_str()).map(String::from),
         opus_model: env.and_then(|e| e.get("ANTHROPIC_DEFAULT_OPUS_MODEL")).and_then(|v| v.as_str()).map(String::from),
         sonnet_model: env.and_then(|e| e.get("ANTHROPIC_DEFAULT_SONNET_MODEL")).and_then(|v| v.as_str()).map(String::from),
+        haiku_fallback: env
+            .and_then(|e| e.get("ANTHROPIC_FALLBACK_HAIKU_MODELS"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default(),
+        sonnet_fallback: env
+            .and_then(|e| e.get("ANTHROPIC_FALLBACK_SONNET_MODELS"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default(),
+        opus_fallback: env
+            .and_then(|e| e.get("ANTHROPIC_FALLBACK_OPUS_MODELS"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default(),
         base_url: env.and_then(|e| e.get("ANTHROPIC_BASE_URL")).and_then(|v| v.as_str()).map(String::from),
         auth_token: env.and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN")).and_then(|v| v.as_str()).map(String::from),
     })
@@ -5767,7 +5879,7 @@ async fn set_claude_code_model(model_type: String, model_name: String) -> Result
     let config_dir = home.join(".claude");
     std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     let config_path = config_dir.join("settings.json");
-    
+
     // Read existing config or create new
     let mut json: serde_json::Value = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
@@ -5775,12 +5887,12 @@ async fn set_claude_code_model(model_type: String, model_name: String) -> Result
     } else {
         serde_json::json!({})
     };
-    
+
     // Ensure env object exists
     if json.get("env").is_none() {
         json["env"] = serde_json::json!({});
     }
-    
+
     // Map model_type to env var name
     let env_key = match model_type.as_str() {
         "haiku" => "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -5788,16 +5900,52 @@ async fn set_claude_code_model(model_type: String, model_name: String) -> Result
         "sonnet" => "ANTHROPIC_DEFAULT_SONNET_MODEL",
         _ => return Err(format!("Unknown model type: {}", model_type)),
     };
-    
+
     // Update the model
     if let Some(env) = json.get_mut("env").and_then(|e| e.as_object_mut()) {
         env.insert(env_key.to_string(), serde_json::Value::String(model_name));
     }
-    
+
     // Write back
     let config_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
     std::fs::write(&config_path, config_str).map_err(|e| e.to_string())?;
-    
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_claude_code_fallbacks(model_type: String, models: Vec<String>) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let config_dir = home.join(".claude");
+    std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    let config_path = config_dir.join("settings.json");
+
+    let mut json: serde_json::Value = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if json.get("env").is_none() {
+        json["env"] = serde_json::json!({});
+    }
+
+    let env_key = match model_type.as_str() {
+        "haiku" => "ANTHROPIC_FALLBACK_HAIKU_MODELS",
+        "opus" => "ANTHROPIC_FALLBACK_OPUS_MODELS",
+        "sonnet" => "ANTHROPIC_FALLBACK_SONNET_MODELS",
+        _ => return Err(format!("Unknown model type: {}", model_type)),
+    };
+
+    if let Some(env) = json.get_mut("env").and_then(|e| e.as_object_mut()) {
+        let list = models.into_iter().map(serde_json::Value::String).collect::<Vec<_>>();
+        env.insert(env_key.to_string(), serde_json::Value::Array(list));
+    }
+
+    let config_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    std::fs::write(&config_path, config_str).map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
@@ -5996,6 +6144,31 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
     // Only try to fetch if proxy is running
     let proxy_running = state.proxy_status.lock().unwrap().running;
     if proxy_running {
+        let parse_usage_limit = |message: &str| -> (Option<i64>, Option<i64>) {
+            let mut resets_at = None;
+            let mut resets_in_seconds = None;
+            if let Some(start) = message.find('{') {
+                let json_part = message[start..].trim();
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_part) {
+                    let error_obj = value.get("error").unwrap_or(&value);
+                    resets_at = error_obj.get("resets_at").and_then(|v| v.as_i64());
+                    resets_in_seconds = error_obj
+                        .get("resets_in_seconds")
+                        .and_then(|v| v.as_i64());
+                } else if let Some(end) = json_part.rfind('}') {
+                    if let Ok(value) =
+                        serde_json::from_str::<serde_json::Value>(&json_part[..=end])
+                    {
+                        let error_obj = value.get("error").unwrap_or(&value);
+                        resets_at = error_obj.get("resets_at").and_then(|v| v.as_i64());
+                        resets_in_seconds = error_obj
+                            .get("resets_in_seconds")
+                            .and_then(|v| v.as_i64());
+                    }
+                }
+            }
+            (resets_at, resets_in_seconds)
+        };
         let client = build_management_client();
         match client
             .get(&url)
@@ -6024,9 +6197,37 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
                                 .replace("\"updated_at\"", "\"updatedAt\"")
                                 .replace("\"last_refresh\"", "\"lastRefresh\"")
                                 .replace("\"success_count\"", "\"successCount\"")
-                                .replace("\"failure_count\"", "\"failureCount\"");
-                                
-                            if let Ok(parsed) = serde_json::from_str::<Vec<AuthFile>>(&converted) {
+                                .replace("\"failure_count\"", "\"failureCount\"")
+                                .replace("\"rate_limited\"", "\"rateLimited\"")
+                                .replace("\"rate_limit_reset_at\"", "\"rateLimitResetAt\"")
+                                .replace("\"rate_limit_reason\"", "\"rateLimitReason\"")
+                                .replace("\"blacklisted_until\"", "\"blacklistedUntil\"");
+
+                            if let Ok(mut parsed) = serde_json::from_str::<Vec<AuthFile>>(&converted) {
+                                let now = chrono::Utc::now();
+                                for file in parsed.iter_mut() {
+                                    let status_message = file.status_message.as_deref().unwrap_or("");
+                                    if status_message.contains("usage_limit_reached") {
+                                        file.rate_limited = Some(true);
+                                        file.rate_limit_reason = Some("usage_limit_reached".to_string());
+
+                                        let (resets_at, resets_in_seconds) =
+                                            parse_usage_limit(status_message);
+                                        if let Some(epoch) = resets_at {
+                                            if let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp(epoch, 0) {
+                                                let iso = dt.to_rfc3339();
+                                                file.rate_limit_reset_at = Some(iso.clone());
+                                                file.blacklisted_until = Some(iso);
+                                            }
+                                        } else if let Some(seconds) = resets_in_seconds {
+                                            if let Some(dt) = now.checked_add_signed(chrono::Duration::seconds(seconds)) {
+                                                let iso = dt.to_rfc3339();
+                                                file.rate_limit_reset_at = Some(iso.clone());
+                                                file.blacklisted_until = Some(iso);
+                                            }
+                                        }
+                                    }
+                                }
                                 files = parsed;
                             }
                         }
@@ -6067,6 +6268,11 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
                                     name: dummy_id,
                                     provider,
                                     status: "disabled".to_string(),
+                                    status_message: None,
+                                    rate_limited: None,
+                                    rate_limit_reset_at: None,
+                                    rate_limit_reason: None,
+                                    blacklisted_until: None,
                                     disabled: true,
                                     unavailable: false,
                                     runtime_only: false,
@@ -6086,7 +6292,6 @@ async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, Str
                                     success_count: None,
                                     failure_count: None,
                                     label: None,
-                                    status_message: None,
                                 };
                                 
                                 files.push(disabled_file);
@@ -7056,6 +7261,7 @@ pub fn run() {
             // Claude Code Settings
             get_claude_code_settings,
             set_claude_code_model,
+            set_claude_code_fallbacks,
             // Updater support check
             is_updater_supported,
             // SSH

@@ -12,6 +12,14 @@ pub struct AuthFile {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limited: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reset_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blacklisted_until: Option<String>,
     #[serde(default)]
     pub disabled: bool,
     #[serde(default)]
